@@ -1,0 +1,21 @@
+{
+  "name": "newschecker",
+  "version": "1.0.0",
+  "description": "Checks facebook posts  for bias.",
+  "main": "server.js",
+  "dependencies": {
+    "async": "^2.1.4",
+    "body-parser": "^1.15.2",
+    "cors": "^2.8.1",
+    "express": "^4.14.0",
+    "request": "^2.79.0",
+    "trie": "^1.0.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "author": "Charles Sweet",
+  "license": "ISC"
+}
