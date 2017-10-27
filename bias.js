@@ -1,6 +1,5 @@
 var fs = require("fs");
 var async = require("async");
-var trie = require("trie");
 var fileFolder = "./bias/";
 var files = [];
 var loaded = [];
