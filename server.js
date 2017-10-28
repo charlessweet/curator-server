@@ -97,6 +97,28 @@ var allowCrossDomain = function(req, res, next) {
 	}
 };
 
+var validateJWT = function(req, res, next) {
+	let headerInfo = req.header("Authorization");
+	if(headerInfo !== undefined){
+		let headerInfos = headerInfo.split(" ");
+		if(headerInfos.length > 1){
+			console.log(headerInfos[1], jwt_secret)
+			try{
+				let jwtParsed = jwt.verify(headerInfos[1], jwt_secret)
+				console.log("jwt", jwtParsed)
+			}catch(e){
+				//allow token exchange to continue
+				if(req.url === "/tokens/exchange/facebook"){
+					next()
+				}else{
+					console.log(req.url, e)
+					throw e		
+				}
+			}
+		}
+	}
+}
+
 function parseCouchResponse(couchData, callback, parms){
 	if(!varset(couchData)){
 		var err = {};
@@ -132,7 +154,6 @@ function callCouch(relativeUrl, method, data, callback, parms){
 }
 
 var validateBiasCheckerApp = function(req,res,next){
-	console.log(req.path)
 	if((req.path === "/bookmark" || req.path.startsWith("/documentation/") || req.path === "/") && req.method === "GET"){
 		next();
 	}else{
@@ -159,6 +180,7 @@ var validateBiasCheckerApp = function(req,res,next){
 
 app.use(allowCrossDomain);
 app.use(validateBiasCheckerApp);
+app.use(validateJWT);
 app.use(bodyParser.json());//json support
 app.use(bodyParser.urlencoded({ extended: true })); // support encoded bodies	
 
@@ -1207,11 +1229,9 @@ function persistUser(authInfo, response, callback){
 
 function determineRolesForUser(memberId, response, callback){
 	let relativeUrl = "/authorization/_design/roles/_view/rolelist_idx?limit=10&reduce=false&startkey=%22" + memberId + "%22&endkey=%22" + memberId + "%22";
-	console.log(relativeUrl)
 	callCouch(relativeUrl, "GET", null, function(error, data){
 		if(handleError(error, response, "Could not add roles for user.", 400))
 			return;
-		console.log(data)
 		let roles = data.rows.map((x) => x.value);
 		callback(null, response, roles)
 	})
@@ -1267,7 +1287,9 @@ function generateJwt(userId, memberId, scope){
 		"scope":scope
 	}
 	let expirationWindow = (Math.random() * (180 - 60) + 60) + "m";
-	return jwt.sign(data, jwt_secret, { expiresIn : expirationWindow});
+	let token = jwt.sign(data, jwt_secret, { expiresIn : expirationWindow});
+	console.log(token, jwt_secret);
+	return token;
 }
 
 function isInRole(memberId, roleName, response, callback){
