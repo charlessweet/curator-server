@@ -38,6 +38,8 @@ var COUCH_LOG_ENABLED = (process.env.COUCH_LOG_ENABLED || "no");
 var AUTOMONITOR_LOG_ENABLED = (process.env.AUTOMONITOR_LOG_ENABLED || "yes");
 var FB_POLLING_RATE = (process.env.FB_POLLING_RATE || 1000*60*5);
 
+var jwt =require('jsonwebtoken');
+
 function htmlEscape(str) {
     return str
         .replace(/&/g, '&amp;')
@@ -1243,15 +1245,30 @@ app.post('/tokens/exchange/facebook', function(request, response){
 				console.log("User was persisted but failed Facebook ping.");
 			}
 			determineRolesForUser(fbAuthToken.memberId, response, function(error, res, rolesList){
-				console.log(rolesList)
 				if(!varset(error)){
 					fbAuthToken.roles = rolesList
 				}
+				fbAuthToken.jwt = generateJwt(fbAuthToken.userID, fbAuthToken.memberId, rolesList);
 				response.json(fbAuthToken);				
 			})
 		})
 	});
 });
+
+/**
+You might have noticed the salt above. That is for salting the login requests, this one is the secret
+for signing the jwt.
+*/
+var jwt_secret = makeid();
+function generateJwt(userId, memberId, scope){
+	let data = {
+		"userId":userId,
+		"memberId":memberId,
+		"scope":scope
+	}
+	let expirationWindow = (Math.random() * (180 - 60) + 60) + "m";
+	return jwt.sign(data, jwt_secret, { expiresIn : expirationWindow});
+}
 
 function isInRole(memberId, roleName, response, callback){
 	let memberRole = memberId + "_" + roleName;
