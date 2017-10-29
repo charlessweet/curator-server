@@ -82,7 +82,6 @@ var allowCrossDomain = function(req, res, next) {
 				break;
 		}
 	}
-	console.log("allowCrossDomain", origin);
 	res.header('Access-Control-Allow-Origin', "*");
 	res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
 	res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With, X-BIASCHECKER-API-KEY, X-BIASCHECKER-APP-ID');
@@ -98,22 +97,21 @@ var allowCrossDomain = function(req, res, next) {
 };
 
 var validateJWT = function(req, res, next) {
+	//don't check for JWT on token exchange
+	if(req.url === "/tokens/exchange/facebook"){
+		next()
+		return
+	}
 	let headerInfo = req.header("Authorization");
 	if(headerInfo !== undefined){
 		let headerInfos = headerInfo.split(" ");
 		if(headerInfos.length > 1){
-			console.log(headerInfos[1], jwt_secret)
 			try{
 				let jwtParsed = jwt.verify(headerInfos[1], jwt_secret)
-				console.log("jwt", jwtParsed)
+				req.jwt = jwtParsed
 			}catch(e){
-				//allow token exchange to continue
-				if(req.url === "/tokens/exchange/facebook"){
-					next()
-				}else{
-					console.log(req.url, e)
-					throw e		
-				}
+				console.log("Failed to validate JWT", req.url, e)
+				throw e		
 			}
 		}
 	}
@@ -1167,9 +1165,41 @@ app.get('/articles', function(request,response){
 	});	
 });
 
+//create a new user account
+app.post('/members', function(request, response){
+	let member = {};
+	member.memberId = makeid(64);
+	member.email = request.body.email;
+	member.validated = false;
+	member.validation_code = makeid(64);
+	member.password = generatePasswordHash(request.body.password, member.userId);
+	callCouch("/password/" + member.memberId, "PUT", password, function(error, data){
+		if(varset(error)){
+			reportError(error,"Failed to set password for member.", response);
+		}else{
+			callCouch("/member/" + member.memberId, "PUT", member, function(error,data){
+				if(varset(error)){
+					reportError(error, "Failed to create login for member.", response);
+				}else{
+					let ret = {"status":"created", "memberId":member.memberId};
+					response.json(ret);
+				}
+			});
+		}
+	});	
+});
+
+app.post('/login', function(request, response){
+
+});
+
+function generatePasswordHash(username, original){
+	return sha256(request.body.password + request.params.userId);
+}
+
 //register a user with an existing facebook login to a BiasChecker login
 //role: user (must be the same user)
-app.post('/users/:userId/register', function(request, response){
+app.post('/members/:memberId/register', function(request, response){
 	verifyToken(request, response, function(error, response, data){
 		if(!authorized(request.params.userId, request.query.biasToken)){
 			reportError("Failed to register user.", "Target and token don't match.", response, 401);			
@@ -1190,7 +1220,7 @@ app.post('/users/:userId/register', function(request, response){
 
 					//create password object
 					var password = {};
-					password.value = sha256(request.body.password);
+					password.value = generatePasswordHash(request.body.password, request.body.userId);
 
 					callCouch("/password/" + id, "PUT", password, function(error, data){
 						if(varset(error)){
@@ -1287,7 +1317,7 @@ function generateJwt(userId, memberId, scope){
 		"scope":scope
 	}
 	let expirationWindow = (Math.random() * (180 - 60) + 60) + "m";
-	let token = jwt.sign(data, jwt_secret, { expiresIn : expirationWindow});
+	let token = jwt.sign(data, jwt_secret, { expiresIn : expirationWindow, issuer: "urn:curator.biascheker.org"});
 	console.log(token, jwt_secret);
 	return token;
 }
