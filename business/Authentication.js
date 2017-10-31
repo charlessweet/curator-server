@@ -1,11 +1,12 @@
 var sha256 = require('js-sha256')
-
+var couch = require('./Couch.js')
+var err = require('./Error.js')
 /*
 These are all async and rely on the callback pattern (jsonMessage, error, data) => {}
 */
  exports.verifyUserExists = function(userId, response, callback){
 	var relativeUrl = "/facebook_users/_design/unique_users/_view/unique_users_idx?limit=1&reduce=false&startkey=%22" + userId + "%22&endkey=%22" + userId + "%22" 
-	callCouch(relativeUrl, "GET", null, function(error, data){
+	couch.callCouch(relativeUrl, "GET", null, function(error, data){
 		if(varset(error)){
 			reportError(error, "User has no existing account.", response, 401) 
 		}else{
@@ -20,7 +21,7 @@ These are all async and rely on the callback pattern (jsonMessage, error, data) 
 
  exports.getMember = function(memberId, callback){
 	let relativeUrl = "/member/" + memberId 
-	callCouch(relativeUrl, "GET", null, callback) 
+	couch.callCouch(relativeUrl, "GET", null, callback) 
 }
 
 exports.generatePasswordHash = function(password, passwordSalt){
@@ -29,10 +30,10 @@ exports.generatePasswordHash = function(password, passwordSalt){
 
 exports.getMemberByUsernamePassword = function(userName, password, response, callback){
 	let relativeUrl = "/member/_design/memberships/_view/members_by_username?limit=2&reduce=false&startkey=%22" + userName + "%22&endkey=%22" + userName + "%22"
-	callCouch(relativeUrl, "GET", null, function(error, member){
+	couch.callCouch(relativeUrl, "GET", null, function(error, member){
 		let providedPasswordHash = generatePasswordHash(password, member.password_salt)
 		let relativeUrl = "/password/data.memberId"
-		callCouch(relativeUrl, "GET", null, function(error, password){
+		couch.callCouch(relativeUrl, "GET", null, function(error, password){
 			if(password.value === providedPasswordHash){
 				callback(null, null, member)
 			}else{
@@ -44,7 +45,7 @@ exports.getMemberByUsernamePassword = function(userName, password, response, cal
 
  exports.determineRolesForUser = function(memberId, response, callback){
 	let relativeUrl = "/authorization/_design/roles/_view/rolelist_idx?limit=10&reduce=false&startkey=%22" + memberId + "%22&endkey=%22" + memberId + "%22" 
-	callCouch(relativeUrl, "GET", null, function(error, data){
+	couch.callCouch(relativeUrl, "GET", null, function(error, data){
 		if(handleError(error, response, "Could not add roles for user.", 400))
 			return 
 		let roles = data.rows.map((x) => x.value) 
@@ -107,7 +108,7 @@ exports.validateBiasCheckerApp = function(req,res,next){
 		var sharedSecret = req.header("X-BIASCHECKER-API-KEY") 	
 		var appId = req.header("X-BIASCHECKER-APP-ID") 
 		var relativeUrl = "/apps/_design/authorizedapp/_view/authorizedapp_idx?limit=100&reduce=false&startkey=%22" + appId + "%22&endkey=%22" + appId + "%22" 
-		 couch.callCouch(relativeUrl, "GET", null, function(error, data){
+		 couch.couch.callCouch(relativeUrl, "GET", null, function(error, data){
 			if(varset(error)){
 				res.json(error) 
 			}else{
@@ -130,7 +131,7 @@ exports.verifyToken = function(request, response, callback){
 		reportError("No biasToken was provided.", "Failed to validate token.", response, 401)
 	}else{
 		var relativeUrl = "/facebook_users/_design/tokens/_view/tokens_idx?limit=100&reduce=false&startkey=%22" + request.query.biasToken + "%22&endkey=%22" + request.query.biasToken + "%22"
-		 couch.callCouch(relativeUrl, "GET", null, function(error, data){
+		 couch.couch.callCouch(relativeUrl, "GET", null, function(error, data){
 			if(varset(error)){
 				reportError(error, "Failed to validate token.", response, 401)
 			}else{
