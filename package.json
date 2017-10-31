@@ -10,13 +10,14 @@
     "express": "^4.14.0",
     "js-sha256": "^0.6.0",
     "jsonwebtoken": "^8.1.0",
+    "mocha": "^4.0.1",
     "request": "^2.79.0"
   },
   "devDependencies": {
     "phantomjs-prebuilt": "^2.1.15"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "mocha",
     "start": "node server.js"
   },
   "author": "Charles Sweet",

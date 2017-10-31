@@ -1,3 +1,5 @@
+var sha256 = require('js-sha256')
+
 /*
 These are all async and rely on the callback pattern (jsonMessage, error, data) => {}
 */

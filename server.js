@@ -1095,15 +1095,13 @@ app.post('/authenticate/basic', function(request, response){
 		//find user and get salt
 		auth.getMemberByUsernamePassword(userName, password, function(error, member){
 			if(varset(error)){
-				reportError(error, "Login failed", response)
+				reportError({"status":"Authorization header invalid."}, "Authorization Failed", response);
 			}else{
 				delete member.password_salt;
 				response.json(ret);
-				return;
 			}
 		})
 	}
-	reportError({"status":"Authorization header invalid."}, "Authorization Failed", response);
 })
 
 //exchange a facebook token for a biasToken - checks w/facebook to determine if token is valid
