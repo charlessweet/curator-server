@@ -17,6 +17,8 @@ requestCall.maxRedirects = 5;
 
 var async = require("async");
 var bias = require("./bias.js");
+var auth = require('./business/Authentication.js');
+var err = require('./business/Error.js');
 var bodyParser = require('body-parser');
 var path = require("path");
 var express = require("express");
@@ -244,14 +246,6 @@ function reportError(error, message, response, statusCode){
 	}
 }
 
-function handleError(error, response, failureMessage, failureHttpCode){
-	if(varset(error)){
-		reportError(error, failureMessage, response, failureHttpCode);
-		return true;
-	}
-	return false;
-}
-
 function verifyToken(request, response, callback){
 	if(request.query.biasToken === undefined){
 		reportError("No biasToken was provided.", "Failed to validate token.", response, 401);
@@ -294,36 +288,6 @@ function verifyAccountsAreAvailable(response, callback){
 	});
 }
 
-function getMembership(userId, response, callback){
-	var relativeUrl ="/member/_design/memberships/_view/memberships_idx?limit=100&reduce=false&startkey=%22" + userId + "%22&endkey=%22" + userId + "%22";
-	var found = {"found":true};
-	callCouch(relativeUrl, "GET", null, function(error, data){
-		if(varset(error)){
-			reportError(error, "Failed to find membership for " + userId + ".");//bad, but not critical - treat user as non-member
-			callback(error, response, found);
-		}else{
-			if(data.rows.length > 0){
-				found.memberId = data.rows[0].value;
-			}
-			callback(error, response, found);
-		}
-	});
-}
-
-function verifyUserExists(userId, response, callback){
-	var relativeUrl = "/facebook_users/_design/unique_users/_view/unique_users_idx?limit=1&reduce=false&startkey=%22" + userId + "%22&endkey=%22" + userId + "%22";
-	callCouch(relativeUrl, "GET", null, function(error, data){
-		if(varset(error)){
-			reportError(error, "User has no existing account.", response, 401);
-		}else{
-			if(data.rows.length > 0){
-				getMembership(userId, response, callback);
-			}else{
-				callback({"error":"User account not found."}, response, null);
-			}
-		}
-	});
-}
 
 function getSettingsForUser(userId, callback){
 	var relativeUrl = "/user_settings/" + userId;
@@ -1165,34 +1129,6 @@ app.get('/articles', function(request,response){
 	});	
 });
 
-//create a new user account
-app.post('/members', function(request, response){
-	let member = {};
-	member.memberId = makeid(64);
-	member.email = request.body.email;
-	member.validated = false;
-	member.validation_code = makeid(64);
-	member.password = generatePasswordHash(request.body.password, member.userId);
-	callCouch("/password/" + member.memberId, "PUT", password, function(error, data){
-		if(varset(error)){
-			reportError(error,"Failed to set password for member.", response);
-		}else{
-			callCouch("/member/" + member.memberId, "PUT", member, function(error,data){
-				if(varset(error)){
-					reportError(error, "Failed to create login for member.", response);
-				}else{
-					let ret = {"status":"created", "memberId":member.memberId};
-					response.json(ret);
-				}
-			});
-		}
-	});	
-});
-
-app.post('/login', function(request, response){
-
-});
-
 function generatePasswordHash(username, original){
 	return sha256(request.body.password + request.params.userId);
 }
@@ -1207,7 +1143,7 @@ app.post('/members/:memberId/register', function(request, response){
 			request.body.email === undefined){
 			reportError("Failed to register user.", "No password or user id was supplied.", response);
 		}else{
-			verifyUserExists(request.params.userId, response, function(error, response, data){
+			auth.verifyUserExists(request.params.userId, response, function(error, response, data){
 				if(varset(error)){
 					reportError(error, "Failed to register user.", response);
 				}else{
@@ -1251,29 +1187,70 @@ function confirmFacebookUser(authInfo, response, callback){
 function persistUser(authInfo, response, callback){
 	let relativeUrl = "/facebook_users/" + authInfo.accessToken
 	callCouch(relativeUrl, "PUT", authInfo, function(error, data){
-		if(handleError(error, response, "Failed to save facebook user.", 400))
+		if( err.handleError(error, response, "Failed to save facebook user.", 400))
 			return;
 		confirmFacebookUser(authInfo, response, callback);
 	})
 }
 
-function determineRolesForUser(memberId, response, callback){
-	let relativeUrl = "/authorization/_design/roles/_view/rolelist_idx?limit=10&reduce=false&startkey=%22" + memberId + "%22&endkey=%22" + memberId + "%22";
-	callCouch(relativeUrl, "GET", null, function(error, data){
-		if(handleError(error, response, "Could not add roles for user.", 400))
-			return;
-		let roles = data.rows.map((x) => x.value);
-		callback(null, response, roles)
-	})
-}
+//create a new user account
+app.post('/members', function(request, response){
+	let member = {};
+	member.member_id = makeid(64);
+	member.email = request.body.email;
+	member.validated = false;
+	member.validation_code = makeid(64);
+	member.password_salt = makeid(64);
+	let password = generatePasswordHash(request.body.password, member.password_salt);
+	callCouch("/password/" + member.memberId, "PUT", password, function(error, data){
+		if(varset(error)){
+			reportError(error,"Failed to set password for member.", response);
+		}else{
+			callCouch("/member/" + member.memberId, "PUT", member, function(error,data){
+				if(varset(error)){
+					reportError(error, "Failed to create login for member.", response);
+				}else{
+					let ret = {"status":"created", "memberId":member.memberId};
+					//send notification email
+					//user validation flow
+					response.json(ret);
+				}
+			});
+		}
+	});	
+});
+
+app.post('/authenticate/basic', function(request, response){
+	let authHeader = request.header("Authorization").split(" ")
+	if(authHeader[0] === "Basic"){
+		let credentials = atob(authHeader[1].split(":"))
+		let userName = credentials[0]
+		let password = credentials[1]
+		//find user and get salt
+		getMember(userName, password, function(error, member){
+			if(varset(error)){
+				reportError(error, "Login failed", response)
+			}else{
+				let passwordHash = generatePasswordHash(password, member.password_salt)
+				validatePassword(member.member_id, passwordHash, function(error, result){
+					if(varset(error)){
+						reportError(error, "Login failed", response)
+					}else{
+						//return the user information
+
+					}
+				})
+			}
+		})
+	}
+	
+})
 
 //exchange a facebook token for a biasToken - checks w/facebook to determine if token is valid
 //role:user
-app.post('/tokens/exchange/facebook', function(request, response){
+app.post('/authenticate/facebook', function(request, response){
 	var fbAuthToken = request.body;
 
-	fbAuthToken.minutes = 30;
-	fbAuthToken.expires = new Date(new Date().getTime() + fbAuthToken.minutes * 60000);
 	fbAuthToken.userId = sha256(fbAuthToken.userID);
 	fbAuthToken.biasAccessToken = sha256(fbAuthToken.userId + salt);
 
@@ -1282,11 +1259,11 @@ app.post('/tokens/exchange/facebook', function(request, response){
 	delete fbAuthToken.expiresIn;
 	delete fbAuthToken.minutes;
 
-	verifyUserExists(fbAuthToken.userId, response, function(error, response, data){
+	auth.verifyUserExists(fbAuthToken.userId, response, function(error, response, data){
 		fbAuthToken.memberId = data.memberId;
 		if(varset(error)){
 			verifyAccountsAreAvailable(response, function(error, response, data){
-				if(handleError(error, response, "Login failed.  No accounts are available.", 400))
+				if( err.handleError(error, response, "Login failed.  No accounts are available.", 400))
 					return;
 			});			
 		}
@@ -1298,7 +1275,7 @@ app.post('/tokens/exchange/facebook', function(request, response){
 				if(!varset(error)){
 					fbAuthToken.roles = rolesList
 				}
-				fbAuthToken.jwt = generateJwt(fbAuthToken.userID, fbAuthToken.memberId, rolesList);
+				fbAuthToken.jwt = generateJwt(fbAuthToken.userId, fbAuthToken.memberId, rolesList);
 				response.json(fbAuthToken);				
 			})
 		})
@@ -1342,9 +1319,10 @@ function isInRole(memberId, roleName, response, callback){
 
 app.get('/members/promotions/pending', function(request, response){
 	verifyToken(request, response, function(error, response, data){
-		getMembership(data.userId, response, function(error, response, data){
+		
+		(data.userId, response, function(error, response, data){
 			isInRole(data.memberId, "Philosopher-Ruler", response, function(error, response, data){
-				if(handleError(error, response, "Individual is in invalid role.", 401))
+				if( err.handleError(error, response, "Individual is in invalid role.", 401))
 					return;
 				var relativeUrl = "/member/_design/memberships/_view/unapproved_requests?limit=100&reduce=false";
 				callCouch(relativeUrl, "GET", null, function(error, data){
@@ -1369,11 +1347,6 @@ function addRole(memberId, roleName, callback){
 	callCouch(relativeUrl, "PUT",role, callback);
 }
 
-function getMember(memberId, callback){
-	let relativeUrl = "/member/" + memberId;
-	callCouch(relativeUrl, "GET", null, callback);
-}
-
 function updateMember(member, callback){
 	let relativeUrl = "/member/" + member._id;
 	callCouch(relativeUrl, "PUT", member, callback);
@@ -1382,13 +1355,13 @@ function updateMember(member, callback){
 function removePromotionRequest(grantorMemberId, memberId, roleName, response, callback){
 	//get the member record
 	getMember(memberId, function(error, data){
-		if(handleError(error, response, "Failed to remove promotion request.", 400))
+		if( err.handleError(error, response, "Failed to remove promotion request.", 400))
 			return;
 		let requestName = "request_" + roleName.toLowerCase();
 		let updateInfo = { "dateGranted": Date.now(), "grantorMemberId": grantorMemberId};
 		data[requestName] = updateInfo;//disable request
 		updateMember(data, function(error, data){
-			if(handleError(error, response, "Failed to disable request.", 400))
+			if( err.handleError(error, response, "Failed to disable request.", 400))
 				return;
 			updateInfo.grantee = memberId;
 			updateInfo.roleName = roleName;
@@ -1401,17 +1374,17 @@ app.post('/members/promotions/pending', function(request, response){
 	verifyToken(request, response, function(error, response, data){
 		let grantorMemberId = data.memberId;
 		isInRole(data.memberId, "Philosopher-Ruler", response, function(error, response, data){ //authorization
-			if(handleError(error, response, "No matching role found.", 401))
+			if( err.handleError(error, response, "No matching role found.", 401))
 				return;
 			isInRole(request.body.targetMemberId, request.body.targetRole, response, function(error, response, data){
 				if(!varset(error)){
 					response.json(data);//role was previously added already
 				}
 				addRole(request.body.targetMemberId, request.body.targetRole, function(error, data){
-					if(handleError(error, response, "Failed to add role.", 400))
+					if( err.handleError(error, response, "Failed to add role.", 400))
 						return;
 					removePromotionRequest(grantorMemberId, request.body.targetMemberId, request.body.targetRole, response, function(error, data){
-						if(handleError(error, response, "Failed to remove original promotion request.", 301))
+						if( err.handleError(error, response, "Failed to remove original promotion request.", 301))
 							return;
 						response.json(data);
 					})
@@ -1475,7 +1448,7 @@ function calculateCritiqueScore(category, critiques, articleLength){
 app.post('/articles/:articleId/critique', function(request, response){
 	verifyToken(request, response, function(error, response, data){
 		getArticleFromCouch(request.params.articleId, function(error, data){
-			if(handleError(error, response, "Specified article was not found.", 400))
+			if( err.handleError(error, response, "Specified article was not found.", 400))
 				return;
 			if(data.critiques == undefined){
 				data.critiques = []
@@ -1494,7 +1467,7 @@ app.post('/articles/:articleId/critique', function(request, response){
 				article.logicalErrorScore = calculateCritiqueScore("logical-error", article.critiques, articleLength)
 
 			updateArticleInCouch(data,  function(error, data){
-				if(handleError(error, response, "Failed to add critique.", 400))
+				if( err.handleError(error, response, "Failed to add critique.", 400))
 					return;
 				article.id = article._id
 				delete article._id
