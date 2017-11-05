@@ -29,10 +29,6 @@ var app = express();
 var sha256 = require('js-sha256');
 
 var whitelist = ["www.npr.org", "www.theguardian.com", "www.washingtonpost.com", "www.kagstv.com", "data.bls.gov"];
-var couchdburl = (process.env.COUCHDB_SERVER || "http://localhost:5984");
-var apiKey = (process.env.COUCHDB_APIKEY || "service_user");
-var apiPassword = (process.env.COUCHDB_APIPASSWORD || "nzskBUVuvY1YAbRmMBnP");
-var couchauthheader = "Basic " + new Buffer(apiKey + ":" + apiPassword).toString("base64");
 
 var fbapp_id = (process.env.FB_APP_ID || "382449245425765");
 var fbapp_secret = (process.env.FB_APP_SECRET || "50d4cbbc4f431f21f806d50dbe0ed614");
@@ -42,11 +38,8 @@ var biasAlgorithmVersion = (process.env.BIAS_ALGORITHM_VERSION || "V2");
 var AUTOMONITOR_LOG_ENABLED = (process.env.AUTOMONITOR_LOG_ENABLED || "yes");
 var FB_POLLING_RATE = (process.env.FB_POLLING_RATE || 1000*60*5);
 
-var jwt =require('jsonwebtoken');
-
 //print config info
 function printConfig(){
-	console.log("CouchDB URL:", couchdburl);
 	console.log("Facebook AppId:", fbapp_id);
 	console.log("Bias Algorithm Version (requested):",biasAlgorithmVersion);
 	console.log("PhatomJS Available:", (phantom.isReady() ? "yes" : "no"));
@@ -899,25 +892,23 @@ app.get('/articles/summaries', function(request,response){
 });
 
 app.get('/articles', function(request,response){
-	 auth.verifyToken(request, response, function(error, response, data){
-		var limit = (request.query.limit === undefined ? 1000 : request.query.limit)
-		let relativeUrl = "/site_biases/_design/articletext/_view/article_idx?limit=" + limit + "&reduce=false"
-		 couch.callCouch(relativeUrl, "GET", null, function(error,data){
-			if(common.varset(error)){
-				err.reportError(error, "Failed to retrieve article summaries.",response);
-			}else{
-				let parsedRows = data.rows
-				let result = parsedRows.reverse().map((couchRow) => {
-					let item = couchRow.value;
-					item.id = item._id;
-					delete item._id;
-					delete item._rev;
-					return item;
-				});
-				response.json(result);
-			}
-		});
-	});	
+	var limit = (request.query.limit === undefined ? 1000 : request.query.limit)
+	let relativeUrl = "/site_biases/_design/articletext/_view/article_idx?limit=" + limit + "&reduce=false"
+	 couch.callCouch(relativeUrl, "GET", null, function(error,data){
+		if(common.varset(error)){
+			err.reportError(error, "Failed to retrieve article summaries.",response);
+		}else{
+			let parsedRows = data.rows
+			let result = parsedRows.reverse().map((couchRow) => {
+				let item = couchRow.value;
+				item.id = item._id;
+				delete item._id;
+				delete item._rev;
+				return item;
+			});
+			response.json(result);
+		}
+	});
 });
 
 //register a user with an existing facebook login to a BiasChecker login
@@ -943,7 +934,7 @@ app.post('/members/:memberId/register', function(request, response){
 
 					//create password object
 					var password = {};
-					password.value = generatePasswordHash(request.body.password, request.body.userId);
+					password.value = auth.generatePasswordHash(request.body.password, request.body.userId);
 
 					 couch.callCouch("/password/" + id, "PUT", password, function(error, data){
 						if(common.varset(error)){
@@ -1009,19 +1000,31 @@ app.post('/members', function(request, response){
 app.post('/authenticate/basic', function(request, response){
 	let authHeader = request.header("Authorization").split(" ")
 	if(authHeader[0] === "Basic"){
-		let credentials = atob(authHeader[1].split(":"))
+		let credentials = new Buffer(authHeader[1], "base64").toString("ascii").split(":")
+		console.log(credentials)
 		let userName = credentials[0]
 		let password = credentials[1]
 		//find user and get salt
-		auth.getMemberByUsernamePassword(userName, password, function(error, member){
+		auth.getMemberByUsernamePassword(userName, password, response, function(error, member){
 			if(common.varset(error)){
-				err.reportError({"status":"Authorization header invalid."}, "Authorization Failed", response);
+				err.reportError({"status":"Authorization credentials invalid."}, "Authorization Failed", response);
 			}else{
-				delete member.password_salt;
-				response.json(ret);
+				auth.determineRolesForUser(member._id, response, function(error, rolesList){
+					member.roles = [];
+					if(!common.varset(error)){
+						member.roles = rolesList
+					}
+					let payload = {}
+					payload.scope = rolesList
+					payload.name = member.email
+					payload.memberId = member._id
+					payload.userId = member.userId
+					let jwt = auth.generateJwt(payload);
+					response.json(jwt);			
+				})
 			}
 		})
-	}
+	}		
 })
 
 //exchange a facebook token for a biasToken - checks w/facebook to determine if token is valid
@@ -1053,29 +1056,18 @@ app.post('/authenticate/facebook', function(request, response){
 				if(!common.varset(error)){
 					fbAuthToken.roles = rolesList
 				}
-				fbAuthToken.jwt = generateJwt(fbAuthToken.userId, fbAuthToken.memberId, rolesList);
-				response.json(fbAuthToken);				
+
+				let payload = {}
+				payload.scope = rolesList
+				payload.name = fbAuthToken.name
+				payload.memberId = fbAuthToken.memberId
+				payload.userId = fbAuthToken.userId
+				let jwt = auth.generateJwt(payload);
+				response.json(jwt);				
 			})
 		})
 	});
 });
-
-/**
-You might have noticed the salt above. That is for salting the login requests, this one is the secret
-for signing the jwt.
-*/
-var jwt_secret = common.makeid();
-function generateJwt(userId, memberId, scope){
-	let data = {
-		"userId":userId,
-		"memberId":memberId,
-		"scope":scope
-	}
-	let expirationWindow = (Math.random() * (180 - 60) + 60) + "m";
-	let token = jwt.sign(data, jwt_secret, { expiresIn : expirationWindow, issuer: "urn:curator.biascheker.org"});
-	console.log(token, jwt_secret);
-	return token;
-}
 
 function isInRole(memberId, roleName, response, callback){
 	let memberRole = memberId + "_" + roleName;
