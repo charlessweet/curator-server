@@ -16,11 +16,12 @@ var queryString = require("querystring");
 requestCall.maxRedirects = 5;
 
 var async = require("async");
-var bias = require("./bias.js");
 var auth = require('./business/Authentication.js');
 var err = require('./business/Error.js');
 var couch = require('./business/Couch.js');
 var common = require('./business/Common.js');
+var articles = require('./business/Articles.js');
+var bias = require("./bias.js")
 
 var bodyParser = require('body-parser');
 var path = require("path");
@@ -28,12 +29,8 @@ var express = require("express");
 var app = express();
 var sha256 = require('js-sha256');
 
-var whitelist = ["www.npr.org", "www.theguardian.com", "www.washingtonpost.com", "www.kagstv.com", "data.bls.gov"];
-
 var fbapp_id = (process.env.FB_APP_ID || "382449245425765");
 var fbapp_secret = (process.env.FB_APP_SECRET || "50d4cbbc4f431f21f806d50dbe0ed614");
-
-var biasAlgorithmVersion = (process.env.BIAS_ALGORITHM_VERSION || "V2");
 
 var AUTOMONITOR_LOG_ENABLED = (process.env.AUTOMONITOR_LOG_ENABLED || "yes");
 var FB_POLLING_RATE = (process.env.FB_POLLING_RATE || 1000*60*5);
@@ -41,7 +38,6 @@ var FB_POLLING_RATE = (process.env.FB_POLLING_RATE || 1000*60*5);
 //print config info
 function printConfig(){
 	console.log("Facebook AppId:", fbapp_id);
-	console.log("Bias Algorithm Version (requested):",biasAlgorithmVersion);
 	console.log("PhatomJS Available:", (phantom.isReady() ? "yes" : "no"));
 	console.log("Facebook Polling Rate:", FB_POLLING_RATE + " ms");
 	console.log("Automonitor Log Enabled:", AUTOMONITOR_LOG_ENABLED);
@@ -140,214 +136,6 @@ function updateSiteForUser(requestingUserId, bias, response){
 	});	
 }
 
-function addSiteForUser(requestingUserId, bias, callback){
-	//add to general site table
-	var id = new Buffer(bias.link).toString("base64") + "_" + requestingUserId;
-	bias.userId = requestingUserId;
-	var relativeUrl = "/my_site_biases/" + id;
-	 couch.callCouch(relativeUrl, "PUT", bias, function(error,data){
-		if(common.varset(error)){
-			addToStackTrace(error, "addSiteForUser");
-			callback(error, null);
-		}else{
-			callback(null, data);
-		}
-	});
-}
-
-function addSiteToDatabase(requestingUserId, bias, callback){
-	//add to general site table
-	var id = new Buffer(bias.link).toString("base64");
-	var relativeUrl = "/site_biases/" + id;
-	 couch.callCouch(relativeUrl, "PUT", bias, function(error,data){
-		if(common.varset(error)){
-			addToStackTrace(error, "addSiteToDatabase");
-			//site was already added, but possibly not for this user
-			//try to add for user
-			if(error.error === "conflict"){
-				addSiteForUser(requestingUserId, bias, callback);				
-			}else{
-				callback(error, null);
-			}
-		}else{
-			addSiteForUser(requestingUserId, bias, callback);
-		}
-	});
-}
-
-function addBadLink(link, callback){
-	var relativeUrl = "/bad_links/" + new Buffer(link).toString("base64");
-	var details = {};
-	details.isBad = true;
-	details.link = queryString.escape(link);//non base64 version
-	details.likelyCause = "Too many redirects.";
-	 couch.callCouch(relativeUrl, "PUT", details, function(error, data){
-		if(common.varset(error)){
-			if(error.error !== "conflict"){
-				callback(error, null);
-			}else{
-				var resp = {};
-				resp.link = link;
-				resp.message = "Did not update because link is already tracked.";
-				callback(null, resp);
-			}
-		}else{
-			callback(null, data);
-		}
-	});
-}
-
-function checkKnownBadLinks(link, callback){
-	var relativeUrl = "/bad_links/" + new Buffer(link).toString("base64");
-	var linkInfo = {};
-	linkInfo.link = link;
-	linkInfo.b64link = new Buffer(link).toString("base64");
-	 couch.callCouch(relativeUrl, "GET", null, function(error, data){
-		if(common.varset(error)){
-			if(error.error === "not_found"){
-				callback(null, linkInfo);
-			}else{
-				callback(error, null);				
-			}
-		}else{
-			if(data.isBad){
-				callback(data, null);
-			}else{
-				callback(null, linkInfo);
-			}
-		}
-	});
-}
-
-function getTextUsingRequest(link, callback){
-	var request = {"url":link, "method":"GET"};
-	requestCall(request, function(err, resp, data){
-		if(common.varset(err)){
-			callback(err, null);
-		}else{
-			callback(null, data);
-		}
-	});	
-}
-
-function useAlgorithmVersion(version){
-	if(!phantom.isReady){
-		console.err("phantom-relay.js reports that phantom is not available or in a usable state.");
-	}
-	return (biasAlgorithmVersion === version && phantom.isReady);	
-}
-
-
-
-function analyzeLink(validationQuery, callback){
-	let ret = {isWhiteListed:false, selfLabel:validationQuery.selfLabel, link:validationQuery.linkToValidate, biasScore:0, length:0};
-	ret.title = (validationQuery.title === "" ? null : validationQuery.title);
-	ret.description = (validationQuery.description === "" ? null : validationQuery.description);
-	if(!common.varset(ret.link)){
-		//do nothing
-		ret.link = "Link was null or undefined.";
-		callback(ret, null);
-	}else{
-		checkKnownBadLinks(validationQuery.linkToValidate, function(e3, data){
-			if(common.varset(e3)){
-				callback(e3, null);
-				return;
-			}else{
-				var urlObj = url.parse(validationQuery.linkToValidate);
-				if(urlObj === null || urlObj.pathname === null){
-					callback({"error":"Url parsed was invalid."}, null);
-					return;
-				}
-				if(!whitelist.find(function(element){return element === urlObj.host;})){
-				  	ret.isWhiteListed = false;
-			  	}else{
-				  	ret.isWhiteListed = true;
-			  	}
-				
-				var id = new Buffer(validationQuery.linkToValidate).toString("base64") + "_" + validationQuery.requestingUserId;
-				var relativeUrl = "/my_site_biases/" + id;
-				 couch.callCouch(relativeUrl, "GET", bias, function(error,data){
-					if(common.varset(error)){
-						if(error.error === "not_found"){
-							var getText = getTextUsingRequest;
-							if(useAlgorithmVersion("V2")){
-								getText = phantom.extractText;
-							}
-							getText(ret.link, function(error, pageData){
-								if(useAlgorithmVersion("V2") && !common.varset(ret.title)){
-									if(pageData !== null){
-										var idx = pageData.lastIndexOf("`") + 1;
-										if(idx > 0 && idx < pageData.length){
-											ret.title = common.htmlEscape(pageData.substring(idx));									
-										}										
-									}else{
-										error = {"error":"No data in document."};
-									}
-								}
-								if(!common.varset(ret.title)){
-									var startIndex= urlObj.pathname.lastIndexOf("/");
-									var title = urlObj.pathname.substring(startIndex);
-									if(title.length > 25){
-										title = title.substring(0, 25) + "...";
-									}
-									ret.title = title;
-								}
-								if(!common.varset(error)){
-									   bias.checkBias(pageData, function(score, terms){
-										   console.log("1 link imported: " + ret.link.substring(0, 255));
-										   ret.length = pageData.length;
-										   ret.biasScore = parseFloat(score);
-										   //if bias score is 0 or pageData is 0 bytes then error
-										   if(ret.length === 0 || ret.biasScore === 0){
-											   addBadLink(ret.link, function(err,data){
-												   var error = {"error":"Article was zero length or bias score was zero."};
-												   callback(error, null);
-											   });
-											   return;											   
-										   }
-										   ret.data = pageData;
-										   ret.algver = 2;
-										   ret.scaleScore = bias.scaleAlgV2(score);
-										   ret.biasTerms = terms;
-										   ret.url = urlObj;
-										   ret.created = new Date();
-										   ret.description = validationQuery.description;
-										   console.log("adding to database")
-										   addSiteToDatabase(validationQuery.requestingUserId, ret, function(error, data){
-										   		console.log("in addSiteToDatabase", data.length, ret.length)
-											   if(common.varset(error)){
-											   		console.log("addSiteToDatabase error")
-												   callback(error, null);  
-											   }else{
-											   		console.log("addSiteToDatabase result")
-												   callback(null, ret);		   
-											   }
-										   });
-									   });
-								}else{
-									addBadLink(ret.link, function(err, data){
-										if(common.varset(err)){
-											callback(err, null);
-										}else{
-											callback(data, null);//in both cases, the link was bad
-										}
-									});
-								}
-						 	});					
-						}else{
-							callback(error, null);//database problem
-						}
-					}else{
-						var e2 = {};
-						e2.error = "conflict";
-						callback(e2, null);
-					}
-				});				
-			}
-		});
-	}	
-}
-
 function verifyValidation(error, data){
 	if(common.varset(error)){
 		if(error.error !== "conflict" && !common.varset(error.isBad)){
@@ -399,7 +187,7 @@ function validateFeed(fbAccessToken, userId){
 					query.description = list.data[i].description;
 					query.requestingUserId = userId;
 					if(query.linkToValidate !== null && query.linkToValidate !== undefined){
-						analyzeLink(query, verifyValidation);
+						articles.analyzeLink(query, verifyValidation);
 					}
 				}			
 			}else{
@@ -456,7 +244,7 @@ setInterval(function(){
 	var relativeUrl = "/user_settings/_design/automonitor/_view/automonitor_idx?limit=100&reduce=false";
 	 couch.callCouch(relativeUrl, "GET", null, function(error, data){
 		if(common.varset(error)){
-			err.reportError(error, undefined, "Failed to find automonitor settings.");				
+			err.reportError(error, "Failed to find automonitor settings.");
 		}else{
 			if(data.rows.length > 0){
 				if(AUTOMONITOR_LOG_ENABLED === "yes"){
@@ -509,62 +297,90 @@ app.get('/reasoning', function(request, response){
 	});
 });
 
+app.post('/analyze', function(request, response){
+	let linkReq = request.body
+	linkReq.requestingUserId = request.jwt.userId
+	articles.analyzeLink(request.body, (error, data)=> {
+		if(common.varset(error)){
+			if(error.error === "conflict"){
+				err.reportError({"error":"Request already exists."}, "No  reason to revalidate since the request already exists.", response, "409")
+			}else{
+				err.reportError(error, "Failed to validate.", response, 400)					
+			}
+		}else{
+			response.json(data)
+		}
+	});
+});
+
+app.post('/my/password', function(request, response){
+	auth.getMember(request.jwt.memberId, function(error, member){
+		let relativePwdUrl = "/password/" + request.jwt.memberId
+		couch.callCouch(relativePwdUrl, "GET", null, function(error, password){
+			if(common.varset(error)){
+				err.reportError(error, "Failed to validate.", response, 400)
+			}else{
+				password.value = auth.generatePasswordHash(request.body.password, member.password_salt)
+				couch.callCouch(relativePwdUrl, "PUT", password, function(error, data){
+					if(common.varset(error)){
+						err.reportError(error,"Failed to set password for user.", response)
+					}else{
+						response.json({"status":"password changed"})
+					}
+				})		
+			}
+		})		
+	})
+})
+
 //get articles for a user
 //role:user
-app.get('/users/facebook/:fbUserId/articles', function(request, response){
-	 auth.verifyToken(request, response, function(error, response, data){
-		if(!authorized(sha256(request.params.fbUserId), request.query.biasToken)){
-			response.status(403);
-			response.json({"error":"unauthorized"});
+app.get('/my/articles', function(request, response){
+	var relativeUrl = "/my_site_biases/_design/my_sites/_view/my_sites_idx?limit=100&reduce=false&startkey=%22" + request.jwt.userId + "%22&endkey=%22" + request.jwt.userId + "%22";
+	//retrieve biases for the individual
+	 couch.callCouch(relativeUrl, "GET", null, function(error, data){
+		var parsedRows = (common.varset(data.rows) ? data.rows : []);
+		if(common.varset(error)){
+			err.reportError(error, "Failed to retrieve my site scores.", response);					
 		}else{
-			var relativeUrl = "/my_site_biases/_design/my_sites/_view/my_sites_idx?limit=100&reduce=false&startkey=%22" + request.params.fbUserId + "%22&endkey=%22" + request.params.fbUserId + "%22";
-			console.log(".../articles", relativeUrl)
-			//retrieve biases for the individual
-			 couch.callCouch(relativeUrl, "GET", null, function(error, data){
-				var parsedRows = (common.varset(data.rows) ? data.rows : []);
-				if(common.varset(error)){
-					err.reportError(error, "Failed to retrieve my site scores.", response);					
+			//retrieve statistics for bias
+			var statUrl = "/my_site_biases/_design/my_sites/_view/avg_myscores_idx?limit=1000&reduce=true&group=true";
+			//get consensus scores
+			var siteStats = [];
+			 couch.callCouch(statUrl, "GET", null, function(error2, data2){
+				var i = 0;
+				if(common.varset(error2)){
+					console.error(error2);
 				}else{
-					//retrieve statistics for bias
-					var statUrl = "/my_site_biases/_design/my_sites/_view/avg_myscores_idx?limit=1000&reduce=true&group=true";
-					//get consensus scores
-					var siteStats = [];
-					 couch.callCouch(statUrl, "GET", null, function(error2, data2){
-						var i = 0;
-						if(common.varset(error2)){
-							console.error(error2);
-						}else{
-							var statsList = (common.varset(data2.rows) ? data2.rows : []);
-							for(i = 0; i < statsList.length; i++){
-								siteStats[statsList[i].key] = statsList[i].value;
-							}
-						}
-						for(i = 0; i < parsedRows.length; i++){
-							if(parsedRows[i].value.title === undefined){
-								parsedRows[i].value.title = parsedRows[i].value.link;
-							}
-							if(common.varset(parsedRows[i].value.algver) && parsedRows[i].value.algver === 2){
-								parsedRows[i].value.scaleScore = bias.scaleAlgV2(parsedRows[i].value.biasScore);
-							}else{
-								parsedRows[i].value.scaleScore = bias.scale(parsedRows[i].value.biasScore);
-							}
-							parsedRows[i].value.biasScore = parseFloat(parsedRows[i].value.biasScore);								
-							if(siteStats[parsedRows[i].value.link] !== undefined){
-								var stats = siteStats[parsedRows[i].value.link];
-								parsedRows[i].value.consensusScore = Math.round(stats.sum/stats.count);
-								parsedRows[i].value.consensusCount = stats.count;
-							}				
-						}
-						var result = parsedRows.reverse().map((couchRow) => {
-							let item = couchRow.value;
-							item.id = item._id;
-							delete item._id;
-							delete item._rev;
-							return item;
-						});
-						response.json(result);
-					});
+					var statsList = (common.varset(data2.rows) ? data2.rows : []);
+					for(i = 0; i < statsList.length; i++){
+						siteStats[statsList[i].key] = statsList[i].value;
+					}
 				}
+				for(i = 0; i < parsedRows.length; i++){
+					if(parsedRows[i].value.title === undefined){
+						parsedRows[i].value.title = parsedRows[i].value.link;
+					}
+					if(common.varset(parsedRows[i].value.algver) && parsedRows[i].value.algver === 2){
+						parsedRows[i].value.scaleScore = bias.scaleAlgV2(parsedRows[i].value.biasScore);
+					}else{
+						parsedRows[i].value.scaleScore = bias.scale(parsedRows[i].value.biasScore);
+					}
+					parsedRows[i].value.biasScore = parseFloat(parsedRows[i].value.biasScore);								
+					if(siteStats[parsedRows[i].value.link] !== undefined){
+						var stats = siteStats[parsedRows[i].value.link];
+						parsedRows[i].value.consensusScore = Math.round(stats.sum/stats.count);
+						parsedRows[i].value.consensusCount = stats.count;
+					}				
+				}
+				var result = parsedRows.reverse().map((couchRow) => {
+					let item = couchRow.value;
+					item.id = item._id;
+					delete item._id;
+					delete item._rev;
+					return item;
+				});
+				response.json(result);
 			});
 		}
 	});
@@ -670,26 +486,10 @@ app.post('/bookmark', function(request,response){
 //role:user
 app.post('/validate', function(request, response){
 	 auth.verifyToken(request, response, function(error, response, data){
-		analyzeLink(request.body, function(error, data){
+		articles.analyzeLink(request.body, function(error, data){
 			if(common.varset(error)){
 				if(error.error === "conflict"){
 					err.reportError({"error":"Request already exists."}, "No  reason to revalidate since the request already exists.", response, 409);
-				}else{
-					err.reportError(error, "Failed to validate.", response, 400);					
-				}
-			}else{
-				response.json(data);
-			}
-		});
-	});	
-});
-
-app.post('/analyze', function(request, response){
-	 auth.verifyToken(request, response, function(error, response, data){
-		analyzeLink(request.body, (error, data)=> {
-			if(common.varset(error)){
-				if(error.error === "conflict"){
-					err.reportError({"error":"Request already exists."}, "No  reason to revalidate since the request already exists.", response, "409");
 				}else{
 					err.reportError(error, "Failed to validate.", response, 400);					
 				}
@@ -892,7 +692,7 @@ app.get('/articles/summaries', function(request,response){
 });
 
 app.get('/articles', function(request,response){
-	var limit = (request.query.limit === undefined ? 1000 : request.query.limit)
+	var limit = (request.query.limit === undefined ? 20 : request.query.limit)
 	let relativeUrl = "/site_biases/_design/articletext/_view/article_idx?limit=" + limit + "&reduce=false"
 	 couch.callCouch(relativeUrl, "GET", null, function(error,data){
 		if(common.varset(error)){
@@ -1001,13 +801,13 @@ app.post('/authenticate/basic', function(request, response){
 	let authHeader = request.header("Authorization").split(" ")
 	if(authHeader[0] === "Basic"){
 		let credentials = new Buffer(authHeader[1], "base64").toString("ascii").split(":")
-		console.log(credentials)
+		//console.log(credentials)
 		let userName = credentials[0]
 		let password = credentials[1]
 		//find user and get salt
 		auth.getMemberByUsernamePassword(userName, password, response, function(error, member){
 			if(common.varset(error)){
-				err.reportError({"status":"Authorization credentials invalid."}, "Authorization Failed", response);
+				err.reportError({"status":"Authorization credentials invalid."}, "Authorization Failed", response, 401);
 			}else{
 				auth.determineRolesForUser(member._id, response, function(error, rolesList){
 					member.roles = [];
@@ -1020,6 +820,7 @@ app.post('/authenticate/basic', function(request, response){
 					payload.memberId = member._id
 					payload.userId = member.userId
 					let jwt = auth.generateJwt(payload);
+					//console.log(jwt)
 					response.json(jwt);			
 				})
 			}
@@ -1044,7 +845,7 @@ app.post('/authenticate/facebook', function(request, response){
 		fbAuthToken.memberId = data.memberId;
 		if(common.varset(error)){
 			verifyAccountsAreAvailable(response, function(error, response, data){
-				if( err.handleError(error, response, "Login failed.  No accounts are available.", 400))
+				if( err.handleError(error, response, "Login failed.  No accounts are available.", 401))
 					return;
 			});			
 		}
@@ -1088,25 +889,22 @@ function isInRole(memberId, roleName, response, callback){
 }
 
 app.get('/members/promotions/pending', function(request, response){
-	 auth.verifyToken(request, response, function(error, response, data){
-		
-		(data.userId, response, function(error, response, data){
-			isInRole(data.memberId, "Philosopher-Ruler", response, function(error, response, data){
-				if( err.handleError(error, response, "Individual is in invalid role.", 401))
-					return;
-				var relativeUrl = "/member/_design/memberships/_view/unapproved_requests?limit=100&reduce=false";
-				 couch.callCouch(relativeUrl, "GET", null, function(error, data){
-					if(common.varset(error)){
-						err.reportError(error, "Failed to determine user role.", response, 401);					
-					}else{
-						let rows = data.rows.map((r)=>{return {"memberId":r.value._id,"email":r.value.email, "request_guardian":r.value.request_guardian}});
-						response.json(rows);
-					}
-				})
-			})
-		})
-	})
-});
+	let token = request.jwt
+	console.log(token)
+	if(token.scope.indexOf("philosopher-ruler") < 0){
+		response.status(403).json({"message":"User was unauthorized for action"})
+	}else{
+		var relativeUrl = "/member/_design/memberships/_view/unapproved_requests?limit=100&reduce=false";
+		 couch.callCouch(relativeUrl, "GET", null, function(error, data){
+			if(common.varset(error)){
+				err.reportError(error, "Failed to determine user role.", response, 401);					
+			}else{
+				let rows = data.rows.map((r)=>{return {"memberId":r.value._id,"email":r.value.email, "request_guardian":r.value.request_guardian}});
+				response.json(rows);
+			}
+		})		
+	}
+})
 
 function addRole(memberId, roleName, callback){
 	let id = common.makeid(32);

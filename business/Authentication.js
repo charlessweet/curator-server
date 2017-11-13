@@ -43,6 +43,7 @@ exports.getMemberByUsernamePassword = function(userName, pwd, response, callback
 		let providedPasswordHash = exports.generatePasswordHash(pwd, members.rows[0].value.password_salt)
 		let relativeUrl = "/password/" + members.rows[0].id
 		couch.callCouch(relativeUrl, "GET", null, function(error, password){
+			console.log(providedPasswordHash, password)
 			if(common.varset(error)){
 				callback({"error":"Credentials invalid."}, null)				
 			}else if(password.value === providedPasswordHash){
@@ -72,7 +73,7 @@ exports.validateJWT = function(req, res, next) {
 		next()
 		return
 	}
-	let headerInfo = req.header("Authorization") 
+	let headerInfo = req.header("Authorization")
 	if(headerInfo !== undefined){
 		let headerInfos = headerInfo.split(" ") 
 		if(headerInfos.length > 1){
@@ -82,7 +83,10 @@ exports.validateJWT = function(req, res, next) {
 				next()
 			}catch(e){
 				console.log("Failed to validate JWT", req.url, e)
-				res.end()	
+				let error = {}
+				error.message = "Failed to validate JWT."
+				error.httpCode = 401
+				res.status(401).json(error)
 			}
 		}
 	}
