@@ -11,10 +11,10 @@
     "js-sha256": "^0.6.0",
     "jsonwebtoken": "^8.1.0",
     "request": "^2.79.0",
-    "swagger-express": "^1.0.5"
+    "swagger-express": "^1.0.5",
+    "phantomjs-prebuilt": "^2.1.15"
   },
   "devDependencies": {
-    "phantomjs-prebuilt": "^2.1.15",
     "mocha": "^4.0.1",
   },
   "scripts": {
