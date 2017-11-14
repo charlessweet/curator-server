@@ -15,7 +15,7 @@
     "phantomjs-prebuilt": "^2.1.15"
   },
   "devDependencies": {
-    "mocha": "^4.0.1",
+    "mocha": "^4.0.1"
   },
   "scripts": {
     "test": "mocha",
