@@ -119,7 +119,7 @@ exports.validateJWT = function(req, res, next) {
 }
 
 exports.allowCrossDomain = function(req, res, next) {
-	var origin = "http://localhost:8888" 
+	var origin = "https://curator.biaschecker.org" 
 	if(couchdburl === process.env.COUCHDB_SERVER){
 		switch(req.headers.origin){
 			case "https://www.biaschecker.org":
@@ -131,7 +131,7 @@ exports.allowCrossDomain = function(req, res, next) {
 				break 
 		}
 	}
-	res.header('Access-Control-Allow-Origin', "*") 
+	res.header('Access-Control-Allow-Origin', origin) 
 	res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS') 
 	res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With, X-BIASCHECKER-API-KEY, X-BIASCHECKER-APP-ID') 
 	res.header('X-Frame-Options', 'SAMEORIGIN') 
