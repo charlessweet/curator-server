@@ -711,6 +711,50 @@ app.get('/articles', function(request,response){
 	});
 });
 
+app.post('/verify', function(request, response){
+	
+	
+})
+
+app.post('/register', function(request, response){
+	//create member object
+	let member = {};
+	member.email = request.body.email;
+	member.userId = common.makeid(64);
+	member.password_salt = common.makeid(64);
+	let id = common.makeid(64)
+
+	//create password object
+	var password = {};
+	password.value = auth.generatePasswordHash(request.body.password, member.password_salt);
+
+	auth.checkIfMemberExists(member.email, function(error, data){
+		if(common.varset(error)){
+			err.reportError("Failed to register user.", "Could not determine user status.", response);
+		}else{
+			if(data.exists){
+				err.reportError("Failed to register user.", "User already exists.", response, 409);
+			}else{
+				couch.callCouch("/password/" + id, "PUT", password, function(error, data){
+					if(common.varset(error)){
+						err.reportError(error,"Failed to set password for user.", response);
+					}else{
+						 couch.callCouch("/member/" + id, "PUT", member, function(error,data){
+							if(common.varset(error)){
+								err.reportError(error, "Failed to create login for member.", response)
+							}else{
+								var ret = {}
+								ret.memberId = id
+								response.json(ret)
+							}
+						})
+					}
+				})				
+			}
+		}
+	})
+})
+
 //register a user with an existing facebook login to a BiasChecker login
 //role: user (must be the same user)
 app.post('/members/:memberId/register', function(request, response){
@@ -890,7 +934,7 @@ function isInRole(memberId, roleName, response, callback){
 
 app.get('/members/promotions/pending', function(request, response){
 	let token = request.jwt
-	console.log(token)
+//	console.log(token)
 	if(token.scope.indexOf("philosopher-ruler") < 0){
 		response.status(403).json({"message":"User was unauthorized for action"})
 	}else{
@@ -976,7 +1020,7 @@ app.get('/users/:facebookUserId/search', function(request, response){
 				delete item._rev;
 				return item;
 			});
-			console.log("search", result)
+//			console.log("search", result)
 			response.json(result);
 		})
 	})

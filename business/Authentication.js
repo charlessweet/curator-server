@@ -37,21 +37,46 @@ exports.generatePasswordHash = function(password, passwordSalt){
 	return sha256(password + passwordSalt) 
 }
 
-exports.getMemberByUsernamePassword = function(userName, pwd, response, callback){
+exports.checkIfMemberExists = function(userName, callback){
+	userName = encodeURIComponent(userName)
 	let relativeUrl = "/member/_design/memberships/_view/members_by_username?limit=2&reduce=false&startkey=%22" + userName + "%22&endkey=%22" + userName + "%22"
 	couch.callCouch(relativeUrl, "GET", null, function(error, members){
-		let providedPasswordHash = exports.generatePasswordHash(pwd, members.rows[0].value.password_salt)
-		let relativeUrl = "/password/" + members.rows[0].id
-		couch.callCouch(relativeUrl, "GET", null, function(error, password){
-			console.log(providedPasswordHash, password)
-			if(common.varset(error)){
-				callback({"error":"Credentials invalid."}, null)				
-			}else if(password.value === providedPasswordHash){
-				callback(null, members.rows[0].value)
-			}else{
-				callback({"error":"User account not found."}, null)
+		if(!common.varset(error)){
+			let result = { "exists": false}
+			if(members.rows.length > 0){
+				result.exists = true
 			}
-		})
+			callback(null, result)
+		}else{
+			callback({"error":"Result was inconclusive."}, null)			
+		}
+	})
+}
+
+exports.getMemberByUsernamePassword = function(userName, pwd, response, callback){
+	userName = encodeURIComponent(userName)
+	let relativeUrl = "/member/_design/memberships/_view/members_by_username?limit=2&reduce=false&startkey=%22" + userName + "%22&endkey=%22" + userName + "%22"
+	couch.callCouch(relativeUrl, "GET", null, function(error, members){
+		if(common.varset(error)){
+			callback({"error":"Member could not be retrieved."}, null)
+		}else{
+			if(members.rows.length < 1){
+				callback({"error":"Member does not exist."}, null)
+			}else{
+				let providedPasswordHash = exports.generatePasswordHash(pwd, members.rows[0].value.password_salt)
+				let relativeUrl = "/password/" + members.rows[0].id
+				couch.callCouch(relativeUrl, "GET", null, function(error, password){
+					console.log(providedPasswordHash, password)
+					if(common.varset(error)){
+						callback({"error":"Credentials invalid."}, null)				
+					}else if(password.value === providedPasswordHash){
+						callback(null, members.rows[0].value)
+					}else{
+						callback({"error":"User account not found."}, null)
+					}
+				})			
+			}
+		}
 	})
 }
 
@@ -68,8 +93,9 @@ exports.getMemberByUsernamePassword = function(userName, pwd, response, callback
 }
 
 exports.validateJWT = function(req, res, next) {
+	var skip_auth = ["/authenticate/facebook","/authenticate/basic", "/register"]
 	//don't check for JWT on token exchange
-	if(req.url === "/authenticate/facebook" || req.url === "/authenticate/basic"){
+	if(skip_auth.includes(req.url)){
 		next()
 		return
 	}
