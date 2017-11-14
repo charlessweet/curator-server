@@ -1,6 +1,5 @@
 var fs = require("fs");
 var async = require("async");
-var trie = require("trie");
 var fileFolder = "./bias/";
 var files = [];
 var loaded = [];
@@ -78,3 +77,35 @@ exports.checkBias = function(corpus, callmeback) {
 	   callmeback
 	]);
 };
+
+exports.scaleAlgV2 = function(score){
+	return Math.round(score * 100);
+}
+
+exports.scale = function(score){
+	if(score < 0.005){
+		return 1;
+	}
+	if(score < 0.01){
+		return 2;
+	}
+	if(score < 0.0125) {
+		return 3;
+	}
+	if(score < 0.015) {
+		return 4;
+	}
+	if(score < 0.0175) {
+		return 6;
+	}
+	if(score < 0.02) {
+		return 7;
+	}
+	if(score < 0.0225) {
+		return 8;
+	}
+	if(score < 0.025) {
+		return 9;
+	}
+	return 10;
+}
