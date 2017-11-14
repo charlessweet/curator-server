@@ -9,13 +9,13 @@
     "cors": "^2.8.1",
     "express": "^4.14.0",
     "js-sha256": "^0.6.0",
-    "jsonwebtoken": "^8.1.0",
-    "mocha": "^4.0.1",
+    "jsonwebtoken": "^8.1.0"
     "request": "^2.79.0",
     "swagger-express": "^1.0.5"
   },
   "devDependencies": {
-    "phantomjs-prebuilt": "^2.1.15"
+    "phantomjs-prebuilt": "^2.1.15",
+    "mocha": "^4.0.1",
   },
   "scripts": {
     "test": "mocha",
