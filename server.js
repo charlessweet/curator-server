@@ -540,7 +540,6 @@ app.get('/users/:userId/articles/:myArticleId', function(request,response){
 		}else{
 			var id = new Buffer(data.link).toString("base64");
 			var parentUrl = "/site_biases/" + id;
-			console.log(parentUrl);
 			 couch.callCouch(parentUrl, "GET", null, function(error,data){
 				if(common.varset(error)){
 					err.reportError(error, "Failed to retrieve article 2.", response);					
@@ -932,79 +931,10 @@ function isInRole(memberId, roleName, response, callback){
 	});		
 }
 
-app.get('/members/promotions/pending', function(request, response){
-	let token = request.jwt
-//	console.log(token)
-	if(token.scope.indexOf("philosopher-ruler") < 0){
-		response.status(403).json({"message":"User was unauthorized for action"})
-	}else{
-		var relativeUrl = "/member/_design/memberships/_view/unapproved_requests?limit=100&reduce=false";
-		 couch.callCouch(relativeUrl, "GET", null, function(error, data){
-			if(common.varset(error)){
-				err.reportError(error, "Failed to determine user role.", response, 401);					
-			}else{
-				let rows = data.rows.map((r)=>{return {"memberId":r.value._id,"email":r.value.email, "request_guardian":r.value.request_guardian}});
-				response.json(rows);
-			}
-		})		
-	}
-})
-
-function addRole(memberId, roleName, callback){
-	let id = common.makeid(32);
-	let relativeUrl = "/authorization/" + id;
-	let role = {};
-	role.memberId = memberId;
-	role.role = roleName;
-	 couch.callCouch(relativeUrl, "PUT",role, callback);
-}
-
 function updateMember(member, callback){
 	let relativeUrl = "/member/" + member._id;
 	 couch.callCouch(relativeUrl, "PUT", member, callback);
 }
-
-function removePromotionRequest(grantorMemberId, memberId, roleName, response, callback){
-	//get the member record
-	getMember(memberId, function(error, data){
-		if( err.handleError(error, response, "Failed to remove promotion request.", 400))
-			return;
-		let requestName = "request_" + roleName.toLowerCase();
-		let updateInfo = { "dateGranted": Date.now(), "grantorMemberId": grantorMemberId};
-		data[requestName] = updateInfo;//disable request
-		updateMember(data, function(error, data){
-			if( err.handleError(error, response, "Failed to disable request.", 400))
-				return;
-			updateInfo.grantee = memberId;
-			updateInfo.roleName = roleName;
-			callback(null, updateInfo);
-		})
-	})
-}
-
-app.post('/members/promotions/pending', function(request, response){
-	 auth.verifyToken(request, response, function(error, response, data){
-		let grantorMemberId = data.memberId;
-		isInRole(data.memberId, "Philosopher-Ruler", response, function(error, response, data){ //authorization
-			if( err.handleError(error, response, "No matching role found.", 401))
-				return;
-			isInRole(request.body.targetMemberId, request.body.targetRole, response, function(error, response, data){
-				if(!common.varset(error)){
-					response.json(data);//role was previously added already
-				}
-				addRole(request.body.targetMemberId, request.body.targetRole, function(error, data){
-					if( err.handleError(error, response, "Failed to add role.", 400))
-						return;
-					removePromotionRequest(grantorMemberId, request.body.targetMemberId, request.body.targetRole, response, function(error, data){
-						if( err.handleError(error, response, "Failed to remove original promotion request.", 301))
-							return;
-						response.json(data);
-					})
-				})				
-			})
-		})
-	})	
-})
 
 app.get('/users/:facebookUserId/search', function(request, response){
 	 auth.verifyToken(request, response, function(error, response, data){
@@ -1088,6 +1018,104 @@ app.post('/articles/:articleId/critique', function(request, response){
 			})
 		})
 	})	
+})
+
+app.post('/my/roles', function(request, response){
+	//the only roles allowed are from our list
+	let rolesAllowed = ["guardian"]
+	let roleRequest = request.body
+	let jwtDecoded = request.jwt
+
+	auth.requestRole(jwtDecoded.name, jwtDecoded.memberId, jwtDecoded.memberId, roleRequest.roleName, function(error, data){
+		if(err.handleError(error, response, "Failed to request role", 400))
+			return;
+
+		let domainResponse= {}
+		domainResponse.id = data.id
+		response.json(domainResponse)
+	})
+})
+
+app.get('/roles/requests', function(request, response){
+	if(request.jwt.scope === undefined ||
+		request.jwt.scope.indexOf("philosopher-ruler") == -1){
+		response.status(403)
+		return
+	}
+	//the only roles allowed are from our list
+	let jwtDecoded = request.jwt
+
+	auth.getRoleRequests(function(error, data){
+		if(err.handleError(error, response, "Failed to retrieve role requests", 400))
+			return;
+		if(common.varset(error)){
+			err.reportError(error, "Failed to retrieve estimated scores.", response);					
+		}else{
+			var parsedRows = (common.varset(data.rows) ? data.rows : [])
+			let retRows = parsedRows.map((r) => { 
+				var ret = {}
+				ret.memberId = r.value.memberId
+				ret.requestDate = r.value.requestDate
+				ret.requestor = r.value.requestor
+				ret.roleName = r.value.roleName
+				ret.email = r.value.email
+				return ret
+			})
+			response.json(retRows);
+		}
+	})
+})
+
+app.post('/members/:memberId/roles', function(request, response){
+	if(request.jwt.scope === undefined ||
+		request.jwt.scope.indexOf("philosopher-ruler") == -1){
+		response.status(403)
+		return
+	}
+	//the only roles allowed are from our list
+	let jwtDecoded = request.jwt
+	let targetMemberId = request.params.memberId
+	let roleName = request.body.roleName
+
+	auth.addRole(jwtDecoded.memberId, targetMemberId, roleName, function(error, roleRequest){
+		if(err.handleError(error, response, "Failed to grant role requests", 400))
+			return;
+		if(common.varset(error)){
+			err.reportError(error, "Failed to grant the members role.", response);					
+		}else{
+			var ret = {}
+			ret.memberId = targetMemberId
+			ret.roleName = roleName
+			ret.status = "APPROVED"
+			response.json(ret);
+		}
+	})
+})
+
+app.delete('/roles/:roleName/requests/:memberId', function(request, response){
+	if(request.jwt.scope === undefined ||
+		request.jwt.scope.indexOf("philosopher-ruler") == -1){
+		response.status(403)
+		return
+	}
+	//the only roles allowed are from our list
+	let jwtDecoded = request.jwt
+	let targetMemberId = request.params.memberId
+	let roleName = request.params.roleName
+
+	auth.denyRoleRequest(jwtDecoded.memberId, targetMemberId, roleName, function(error, roleRequest){
+		if(err.handleError(error, response, "Failed to deny role requests", 400))
+			return;
+		if(common.varset(error)){
+			err.reportError(error, "Failed to deny the members role request.", response);					
+		}else{
+			var ret = {}
+			ret.memberId = targetMemberId
+			ret.roleName = roleName
+			ret.status = "DENIED"
+			response.json(ret);
+		}
+	})
 })
 
 app.use('/documentation', express.static('docs'))

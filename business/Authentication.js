@@ -66,7 +66,6 @@ exports.getMemberByUsernamePassword = function(userName, pwd, response, callback
 				let providedPasswordHash = exports.generatePasswordHash(pwd, members.rows[0].value.password_salt)
 				let relativeUrl = "/password/" + members.rows[0].id
 				couch.callCouch(relativeUrl, "GET", null, function(error, password){
-					console.log(providedPasswordHash, password)
 					if(common.varset(error)){
 						callback({"error":"Credentials invalid."}, null)				
 					}else if(password.value === providedPasswordHash){
@@ -119,17 +118,24 @@ exports.validateJWT = function(req, res, next) {
 }
 
 exports.allowCrossDomain = function(req, res, next) {
-	var origin = "https://curator.biaschecker.org" 
-	if(couchdburl === process.env.COUCHDB_SERVER){
-		switch(req.headers.origin){
-			case "https://www.biaschecker.org":
-			case "https://biaschecker.org":
-			case "http://biaschecker.org":
-			case "http://www.biaschecker.org":
-				origin = req.headers.origin 
-				res.header('Strict-Transport-Security', "max-age=31536000  includeSubDomains") 
-				break 
-		}
+	let origin = undefined
+	switch(req.headers.origin){
+		case "http://localhost:8888":
+		case "https://curator.biaschecker.org":
+		case "https://www.biaschecker.org":
+		case "https://biaschecker.org":
+		case "http://biaschecker.org":
+		case "http://www.biaschecker.org":
+			origin = req.headers.origin 
+			res.header('Strict-Transport-Security', "max-age=31536000  includeSubDomains") 
+			break 
+	}
+
+	if(origin === undefined){
+		res.sendStatus(400)
+		//console.log("Invalid origin: " + req.headers.origin)
+		res.end()
+		return
 	}
 	res.header('Access-Control-Allow-Origin', origin) 
 	res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS') 
@@ -201,4 +207,62 @@ exports.generateJwt = function(data){
 	let expirationWindow = (Math.random() * (180 - 60) + 60) + "m";
 	let token = jwt.sign(data, jwt_secret, { expiresIn : expirationWindow, issuer: "urn:curator.biascheker.org"});
 	return token;
+}
+
+exports.requestRole = function(targetMemberEmail, targetMemberId, requestorMemberId, roleName, couchCallback){
+	//transfere to domain
+	let domainRequest = {}
+	domainRequest.roleName = roleName
+	domainRequest.memberId = targetMemberId
+	domainRequest.requestor = requestorMemberId
+	domainRequest.requestDate = new Date()
+	domainRequest.email = targetMemberEmail
+	
+	let requestId = common.makeid(16)
+	let relativeUrl = "/role_requests/" + requestId
+	couch.callCouch(relativeUrl, "PUT", domainRequest, couchCallback)	
+}
+
+exports.getRoleRequests = function(couchCallback){
+	let relativeUrl = "/role_requests/_design/unprocessed/_view/unprocessed_idx?limit=100&reduce=false"
+	couch.callCouch(relativeUrl, "GET", null, couchCallback)
+}
+
+updateRoleRequest = function(actingMemberId, targetMemberId, roleName, status, couchCallback){
+	let key = targetMemberId + "_" + roleName
+	let relativeUrl = "/role_requests/_design/unprocessed/_view/roleMember_idx?limit=1&reduce=false&startkey=%22" + key + "%22&endkey=%22" + key + "%22"
+
+	couch.callCouch(relativeUrl, "GET", null, function(error, roleRequest){
+		if(common.varset(error) || roleRequest.rows.length == 0){
+			couchCallback(error, null)
+			return
+		}
+		roleRequest = roleRequest.rows[0].value
+		roleRequest.processed = true
+		roleRequest.lastUpdateMemberId = actingMemberId
+		roleRequest.lastUpdated = new Date()
+		let relativeUrl = "/role_requests/" + roleRequest._id
+		couch.callCouch(relativeUrl, "PUT", roleRequest, couchCallback)
+	})
+}
+
+exports.denyRoleRequest = function(actingMemberId, targetMemberId, roleName, couchCallback){
+	updateRoleRequest(actingMemberId, targetMemberId, roleName, "DENIED", couchCallback)
+}
+
+exports.addRole = function(actingMemberId, targetMemberId, roleName, couchCallback){
+	let id = common.makeid(32);
+	let relativeUrl = "/authorization/" + id;
+	let role = {};
+	role.memberId = targetMemberId;
+	role.role = roleName;
+	role.lastUpdatedMemberId = actingMemberId
+	role.lastUpdated = new Date()
+	couch.callCouch(relativeUrl, "PUT", role, function(error, result){
+		if(common.varset(error)){
+			couchCallback(error, null)
+			return
+		}
+		updateRoleRequest(actingMemberId, targetMemberId, roleName, "GRANTED", couchCallback)
+	});
 }
