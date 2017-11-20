@@ -988,36 +988,39 @@ function calculateCritiqueScore(category, critiques, articleLength){
 }
 
 app.post('/articles/:articleId/critique', function(request, response){
-	 auth.verifyToken(request, response, function(error, response, data){
-		getArticleFromCouch(request.params.articleId, function(error, data){
-			if( err.handleError(error, response, "Specified article was not found.", 400))
+	if(request.jwt.scope === undefined ||
+		request.jwt.scope.indexOf("guardian") == -1){
+		response.status(403)
+		return
+	}	
+	getArticleFromCouch(request.params.articleId, function(error, data){
+		if( err.handleError(error, response, "Specified article was not found.", 400))
+			return;
+		if(data.critiques == undefined){
+			data.critiques = []
+		}
+		let tcritique = request.body
+		let article = data
+		article.critiques.push(tcritique)
+		let articleLength = article.data.length / 8 //average reader preferred sentence length
+		if(tcritique.errorType == "out-of-context")
+			article.outOfContextScore = calculateCritiqueScore("out-of-context", article.critiques, articleLength)
+
+		if(tcritique.errorType == "factual-error")
+			article.factualErrorScore = calculateCritiqueScore("factual-error", article.critiques, articleLength)
+
+		if(tcritique.errorType == "logical-error")
+			article.logicalErrorScore = calculateCritiqueScore("logical-error", article.critiques, articleLength)
+
+		updateArticleInCouch(data,  function(error, data){
+			if( err.handleError(error, response, "Failed to add critique.", 400))
 				return;
-			if(data.critiques == undefined){
-				data.critiques = []
-			}
-			let tcritique = request.body
-			let article = data
-			article.critiques.push(tcritique)
-			let articleLength = article.data.length / 8 //average reader preferred sentence length
-			if(tcritique.errorType == "out-of-context")
-				article.outOfContextScore = calculateCritiqueScore("out-of-context", article.critiques, articleLength)
-
-			if(tcritique.errorType == "factual-error")
-				article.factualErrorScore = calculateCritiqueScore("factual-error", article.critiques, articleLength)
-
-			if(tcritique.errorType == "logical-error")
-				article.logicalErrorScore = calculateCritiqueScore("logical-error", article.critiques, articleLength)
-
-			updateArticleInCouch(data,  function(error, data){
-				if( err.handleError(error, response, "Failed to add critique.", 400))
-					return;
-				article.id = article._id
-				delete article._id
-				delete article._rev
-				response.json(article)
-			})
+			article.id = article._id
+			delete article._id
+			delete article._rev
+			response.json(article)
 		})
-	})	
+	})
 })
 
 app.post('/my/roles', function(request, response){
