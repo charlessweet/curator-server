@@ -337,53 +337,34 @@ app.post('/my/password', function(request, response){
 //role:user
 app.get('/my/articles', function(request, response){
 	var relativeUrl = "/my_site_biases/_design/my_sites/_view/my_sites_idx?limit=100&reduce=false&startkey=%22" + request.jwt.userId + "%22&endkey=%22" + request.jwt.userId + "%22";
+	console.log("/my/articles", relativeUrl)
 	//retrieve biases for the individual
-	 couch.callCouch(relativeUrl, "GET", null, function(error, data){
-		var parsedRows = (common.varset(data.rows) ? data.rows : []);
-		if(common.varset(error)){
-			err.reportError(error, "Failed to retrieve my site scores.", response);					
-		}else{
-			//retrieve statistics for bias
-			var statUrl = "/my_site_biases/_design/my_sites/_view/avg_myscores_idx?limit=1000&reduce=true&group=true";
-			//get consensus scores
-			var siteStats = [];
-			 couch.callCouch(statUrl, "GET", null, function(error2, data2){
-				var i = 0;
-				if(common.varset(error2)){
-					console.error(error2);
-				}else{
-					var statsList = (common.varset(data2.rows) ? data2.rows : []);
-					for(i = 0; i < statsList.length; i++){
-						siteStats[statsList[i].key] = statsList[i].value;
-					}
-				}
-				for(i = 0; i < parsedRows.length; i++){
-					if(parsedRows[i].value.title === undefined){
-						parsedRows[i].value.title = parsedRows[i].value.link;
-					}
-					if(common.varset(parsedRows[i].value.algver) && parsedRows[i].value.algver === 2){
-						parsedRows[i].value.scaleScore = bias.scaleAlgV2(parsedRows[i].value.biasScore);
-					}else{
-						parsedRows[i].value.scaleScore = bias.scale(parsedRows[i].value.biasScore);
-					}
-					parsedRows[i].value.biasScore = parseFloat(parsedRows[i].value.biasScore);								
-					if(siteStats[parsedRows[i].value.link] !== undefined){
-						var stats = siteStats[parsedRows[i].value.link];
-						parsedRows[i].value.consensusScore = Math.round(stats.sum/stats.count);
-						parsedRows[i].value.consensusCount = stats.count;
-					}				
-				}
-				var result = parsedRows.reverse().map((couchRow) => {
-					let item = couchRow.value;
-					item.id = item._id;
-					delete item._id;
-					delete item._rev;
-					return item;
-				});
-				response.json(result);
-			});
+	articles.getArticlesForUser(request.jwt.userId)
+	.then((parsedRows)=>{
+		var i = 0;
+		for(i = 0; i < parsedRows.length; i++){
+			if(parsedRows[i].title === undefined){
+				parsedRows[i].title = parsedRows[i].link;
+			}
+			if(common.varset(parsedRows[i].algver) && parsedRows[i].algver === 2){
+				parsedRows[i].scaleScore = bias.scaleAlgV2(parsedRows[i].biasScore);
+			}else{
+				parsedRows[i].scaleScore = bias.scale(parsedRows[i].biasScore);
+			}
+			parsedRows[i].biasScore = parseFloat(parsedRows[i].biasScore);								
 		}
-	});
+		var result = parsedRows.map((article) => {
+			let item = article;
+			item.id = item._id;
+			delete item._id;
+			delete item._rev;
+			return item;
+		});
+		response.json(result);
+	})
+	.catch((error)=>{
+		err.reportError(error, "Failed to retrieve my site scores.", response)			
+	})
 });
 
 //analylize a link for bias and add to all bias articles
@@ -1118,6 +1099,31 @@ app.delete('/roles/:roleName/requests/:memberId', function(request, response){
 			ret.status = "DENIED"
 			response.json(ret);
 		}
+	})
+})
+
+app.post('/my/facebook', function(request, response){
+	let jwtDecoded = request.jwt
+	let facebookUserId = request.body.facebookUserId
+	let totalRecs = 0
+	let articlesForUser = articles.getArticlesForUser(facebookUserId)
+	.then((articleList) =>{
+		articles.changeOwner(articleList, jwtDecoded.userId, jwtDecoded.userId)
+		.then((data) => {
+			if(articleList.length > 0){
+				totalRecs += articleList.length
+				articlesForUser.bind(facebookUserId)
+			}else{
+				response.json({"success":"Migrated " + totalRecs + " records"})
+			}
+		})
+		.catch((error) => {
+			console.log(error)
+			err.reportError(error, "Failed to upgrade user account", response)
+		})
+	})
+	.catch((error) => {
+		err.handleError(error, response, "Failed to deny role requests", 400)
 	})
 })
 
