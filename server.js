@@ -337,53 +337,34 @@ app.post('/my/password', function(request, response){
 //role:user
 app.get('/my/articles', function(request, response){
 	var relativeUrl = "/my_site_biases/_design/my_sites/_view/my_sites_idx?limit=100&reduce=false&startkey=%22" + request.jwt.userId + "%22&endkey=%22" + request.jwt.userId + "%22";
+	console.log("/my/articles", relativeUrl)
 	//retrieve biases for the individual
-	 couch.callCouch(relativeUrl, "GET", null, function(error, data){
-		var parsedRows = (common.varset(data.rows) ? data.rows : []);
-		if(common.varset(error)){
-			err.reportError(error, "Failed to retrieve my site scores.", response);					
-		}else{
-			//retrieve statistics for bias
-			var statUrl = "/my_site_biases/_design/my_sites/_view/avg_myscores_idx?limit=1000&reduce=true&group=true";
-			//get consensus scores
-			var siteStats = [];
-			 couch.callCouch(statUrl, "GET", null, function(error2, data2){
-				var i = 0;
-				if(common.varset(error2)){
-					console.error(error2);
-				}else{
-					var statsList = (common.varset(data2.rows) ? data2.rows : []);
-					for(i = 0; i < statsList.length; i++){
-						siteStats[statsList[i].key] = statsList[i].value;
-					}
-				}
-				for(i = 0; i < parsedRows.length; i++){
-					if(parsedRows[i].value.title === undefined){
-						parsedRows[i].value.title = parsedRows[i].value.link;
-					}
-					if(common.varset(parsedRows[i].value.algver) && parsedRows[i].value.algver === 2){
-						parsedRows[i].value.scaleScore = bias.scaleAlgV2(parsedRows[i].value.biasScore);
-					}else{
-						parsedRows[i].value.scaleScore = bias.scale(parsedRows[i].value.biasScore);
-					}
-					parsedRows[i].value.biasScore = parseFloat(parsedRows[i].value.biasScore);								
-					if(siteStats[parsedRows[i].value.link] !== undefined){
-						var stats = siteStats[parsedRows[i].value.link];
-						parsedRows[i].value.consensusScore = Math.round(stats.sum/stats.count);
-						parsedRows[i].value.consensusCount = stats.count;
-					}				
-				}
-				var result = parsedRows.reverse().map((couchRow) => {
-					let item = couchRow.value;
-					item.id = item._id;
-					delete item._id;
-					delete item._rev;
-					return item;
-				});
-				response.json(result);
-			});
+	articles.getArticlesForUser(request.jwt.userId)
+	.then((parsedRows)=>{
+		var i = 0;
+		for(i = 0; i < parsedRows.length; i++){
+			if(parsedRows[i].title === undefined){
+				parsedRows[i].title = parsedRows[i].link;
+			}
+			if(common.varset(parsedRows[i].algver) && parsedRows[i].algver === 2){
+				parsedRows[i].scaleScore = bias.scaleAlgV2(parsedRows[i].biasScore);
+			}else{
+				parsedRows[i].scaleScore = bias.scale(parsedRows[i].biasScore);
+			}
+			parsedRows[i].biasScore = parseFloat(parsedRows[i].biasScore);								
 		}
-	});
+		var result = parsedRows.map((article) => {
+			let item = article;
+			item.id = item._id;
+			delete item._id;
+			delete item._rev;
+			return item;
+		});
+		response.json(result);
+	})
+	.catch((error)=>{
+		err.reportError(error, "Failed to retrieve my site scores.", response)			
+	})
 });
 
 //analylize a link for bias and add to all bias articles
@@ -540,7 +521,6 @@ app.get('/users/:userId/articles/:myArticleId', function(request,response){
 		}else{
 			var id = new Buffer(data.link).toString("base64");
 			var parentUrl = "/site_biases/" + id;
-			console.log(parentUrl);
 			 couch.callCouch(parentUrl, "GET", null, function(error,data){
 				if(common.varset(error)){
 					err.reportError(error, "Failed to retrieve article 2.", response);					
@@ -652,22 +632,37 @@ app.put('/articles/:articleId/keywords', function(request, response){
 	});	
 });
 
-//retrieve bias information for a specific article
 //role:user
-app.get('/articles/:articleId', function(request,response){
-	 auth.verifyToken(request, response, function(error, response, data){
-		var id = request.params.articleId;
-		var relativeUrl = "/site_biases/_design/articletext/_view/articletext_idx?limit=1&reduce=false&startkey=%22" + id + "%22&endkey=%22" + id + "%22";
-		//console.log(relativeUrl);
-		 couch.callCouch(relativeUrl, "GET", null, function(error,data){
-			if(common.varset(error)){
-				err.reportError(error, "Failed to retrieve summaries.",response);
-			}else{
-				response.json(data);
-			}
-		});
-	});	
+app.get('/articles/:articleId/text', function(request,response){
+	var id = request.params.articleId;
+	var relativeUrl = "/site_biases/_design/articletext/_view/articletext_idx?limit=1&reduce=false&startkey=%22" + id + "%22&endkey=%22" + id + "%22";
+	//console.log(relativeUrl);
+	 couch.callCouch(relativeUrl, "GET", null, function(error,data){
+		if(common.varset(error)){
+			err.reportError(error, "Failed to retrieve summaries.",response);
+		}else{
+			response.json(data);
+		}
+	});
 });
+
+app.get('/articles/:articleId', function(request, response){
+	var id = request.params.articleId
+
+	var relativeUrl = "/site_biases/" + id
+	console.log(relativeUrl);
+	 couch.callCouch(relativeUrl, "GET", null, function(error,data){
+		if(common.varset(error)){
+			err.reportError(error, "Failed to retrieve summaries.",response);
+		}else{
+			delete data._rev
+			data.id = data._id
+			delete data._id
+			response.json(data);
+		}
+	})	
+
+})
 
 //retrieve article summaries for all articles in the database.  if missing_tag is definied, then articles must *not* have the 
 //missing tag in their keywords to show up in the returned result set
@@ -932,79 +927,10 @@ function isInRole(memberId, roleName, response, callback){
 	});		
 }
 
-app.get('/members/promotions/pending', function(request, response){
-	let token = request.jwt
-//	console.log(token)
-	if(token.scope.indexOf("philosopher-ruler") < 0){
-		response.status(403).json({"message":"User was unauthorized for action"})
-	}else{
-		var relativeUrl = "/member/_design/memberships/_view/unapproved_requests?limit=100&reduce=false";
-		 couch.callCouch(relativeUrl, "GET", null, function(error, data){
-			if(common.varset(error)){
-				err.reportError(error, "Failed to determine user role.", response, 401);					
-			}else{
-				let rows = data.rows.map((r)=>{return {"memberId":r.value._id,"email":r.value.email, "request_guardian":r.value.request_guardian}});
-				response.json(rows);
-			}
-		})		
-	}
-})
-
-function addRole(memberId, roleName, callback){
-	let id = common.makeid(32);
-	let relativeUrl = "/authorization/" + id;
-	let role = {};
-	role.memberId = memberId;
-	role.role = roleName;
-	 couch.callCouch(relativeUrl, "PUT",role, callback);
-}
-
 function updateMember(member, callback){
 	let relativeUrl = "/member/" + member._id;
 	 couch.callCouch(relativeUrl, "PUT", member, callback);
 }
-
-function removePromotionRequest(grantorMemberId, memberId, roleName, response, callback){
-	//get the member record
-	getMember(memberId, function(error, data){
-		if( err.handleError(error, response, "Failed to remove promotion request.", 400))
-			return;
-		let requestName = "request_" + roleName.toLowerCase();
-		let updateInfo = { "dateGranted": Date.now(), "grantorMemberId": grantorMemberId};
-		data[requestName] = updateInfo;//disable request
-		updateMember(data, function(error, data){
-			if( err.handleError(error, response, "Failed to disable request.", 400))
-				return;
-			updateInfo.grantee = memberId;
-			updateInfo.roleName = roleName;
-			callback(null, updateInfo);
-		})
-	})
-}
-
-app.post('/members/promotions/pending', function(request, response){
-	 auth.verifyToken(request, response, function(error, response, data){
-		let grantorMemberId = data.memberId;
-		isInRole(data.memberId, "Philosopher-Ruler", response, function(error, response, data){ //authorization
-			if( err.handleError(error, response, "No matching role found.", 401))
-				return;
-			isInRole(request.body.targetMemberId, request.body.targetRole, response, function(error, response, data){
-				if(!common.varset(error)){
-					response.json(data);//role was previously added already
-				}
-				addRole(request.body.targetMemberId, request.body.targetRole, function(error, data){
-					if( err.handleError(error, response, "Failed to add role.", 400))
-						return;
-					removePromotionRequest(grantorMemberId, request.body.targetMemberId, request.body.targetRole, response, function(error, data){
-						if( err.handleError(error, response, "Failed to remove original promotion request.", 301))
-							return;
-						response.json(data);
-					})
-				})				
-			})
-		})
-	})	
-})
 
 app.get('/users/:facebookUserId/search', function(request, response){
 	 auth.verifyToken(request, response, function(error, response, data){
@@ -1058,36 +984,162 @@ function calculateCritiqueScore(category, critiques, articleLength){
 }
 
 app.post('/articles/:articleId/critique', function(request, response){
-	 auth.verifyToken(request, response, function(error, response, data){
-		getArticleFromCouch(request.params.articleId, function(error, data){
-			if( err.handleError(error, response, "Specified article was not found.", 400))
+	if(request.jwt.scope === undefined ||
+		request.jwt.scope.indexOf("guardian") == -1){
+		response.status(403)
+		return
+	}	
+	getArticleFromCouch(request.params.articleId, function(error, data){
+		if( err.handleError(error, response, "Specified article was not found.", 400))
+			return;
+		if(data.critiques == undefined){
+			data.critiques = []
+		}
+		let tcritique = request.body
+		let article = data
+		article.critiques.push(tcritique)
+		let articleLength = article.data.length / 8 //average reader preferred sentence length
+		if(tcritique.errorType == "out-of-context")
+			article.outOfContextScore = calculateCritiqueScore("out-of-context", article.critiques, articleLength)
+
+		if(tcritique.errorType == "factual-error")
+			article.factualErrorScore = calculateCritiqueScore("factual-error", article.critiques, articleLength)
+
+		if(tcritique.errorType == "logical-error")
+			article.logicalErrorScore = calculateCritiqueScore("logical-error", article.critiques, articleLength)
+
+		updateArticleInCouch(data,  function(error, data){
+			if( err.handleError(error, response, "Failed to add critique.", 400))
 				return;
-			if(data.critiques == undefined){
-				data.critiques = []
-			}
-			let tcritique = request.body
-			let article = data
-			article.critiques.push(tcritique)
-			let articleLength = article.data.length / 8 //average reader preferred sentence length
-			if(tcritique.errorType == "out-of-context")
-				article.outOfContextScore = calculateCritiqueScore("out-of-context", article.critiques, articleLength)
-
-			if(tcritique.errorType == "factual-error")
-				article.factualErrorScore = calculateCritiqueScore("factual-error", article.critiques, articleLength)
-
-			if(tcritique.errorType == "logical-error")
-				article.logicalErrorScore = calculateCritiqueScore("logical-error", article.critiques, articleLength)
-
-			updateArticleInCouch(data,  function(error, data){
-				if( err.handleError(error, response, "Failed to add critique.", 400))
-					return;
-				article.id = article._id
-				delete article._id
-				delete article._rev
-				response.json(article)
-			})
+			article.id = article._id
+			delete article._id
+			delete article._rev
+			response.json(article)
 		})
-	})	
+	})
+})
+
+app.post('/my/roles', function(request, response){
+	//the only roles allowed are from our list
+	let rolesAllowed = ["guardian"]
+	let roleRequest = request.body
+	let jwtDecoded = request.jwt
+
+	auth.requestRole(jwtDecoded.name, jwtDecoded.memberId, jwtDecoded.memberId, roleRequest.roleName, function(error, data){
+		if(err.handleError(error, response, "Failed to request role", 400))
+			return;
+
+		let domainResponse= {}
+		domainResponse.id = data.id
+		response.json(domainResponse)
+	})
+})
+
+app.get('/roles/requests', function(request, response){
+	if(request.jwt.scope === undefined ||
+		request.jwt.scope.indexOf("philosopher-ruler") == -1){
+		response.status(403)
+		return
+	}
+	//the only roles allowed are from our list
+	let jwtDecoded = request.jwt
+
+	auth.getRoleRequests(function(error, data){
+		if(err.handleError(error, response, "Failed to retrieve role requests", 400))
+			return;
+		if(common.varset(error)){
+			err.reportError(error, "Failed to retrieve estimated scores.", response);					
+		}else{
+			var parsedRows = (common.varset(data.rows) ? data.rows : [])
+			let retRows = parsedRows.map((r) => { 
+				var ret = {}
+				ret.memberId = r.value.memberId
+				ret.requestDate = r.value.requestDate
+				ret.requestor = r.value.requestor
+				ret.roleName = r.value.roleName
+				ret.email = r.value.email
+				return ret
+			})
+			response.json(retRows);
+		}
+	})
+})
+
+app.post('/members/:memberId/roles', function(request, response){
+	if(request.jwt.scope === undefined ||
+		request.jwt.scope.indexOf("philosopher-ruler") == -1){
+		response.status(403)
+		return
+	}
+	//the only roles allowed are from our list
+	let jwtDecoded = request.jwt
+	let targetMemberId = request.params.memberId
+	let roleName = request.body.roleName
+
+	auth.addRole(jwtDecoded.memberId, targetMemberId, roleName, function(error, roleRequest){
+		if(err.handleError(error, response, "Failed to grant role requests", 400))
+			return;
+		if(common.varset(error)){
+			err.reportError(error, "Failed to grant the members role.", response);					
+		}else{
+			var ret = {}
+			ret.memberId = targetMemberId
+			ret.roleName = roleName
+			ret.status = "APPROVED"
+			response.json(ret);
+		}
+	})
+})
+
+app.delete('/roles/:roleName/requests/:memberId', function(request, response){
+	if(request.jwt.scope === undefined ||
+		request.jwt.scope.indexOf("philosopher-ruler") == -1){
+		response.status(403)
+		return
+	}
+	//the only roles allowed are from our list
+	let jwtDecoded = request.jwt
+	let targetMemberId = request.params.memberId
+	let roleName = request.params.roleName
+
+	auth.denyRoleRequest(jwtDecoded.memberId, targetMemberId, roleName, function(error, roleRequest){
+		if(err.handleError(error, response, "Failed to deny role requests", 400))
+			return;
+		if(common.varset(error)){
+			err.reportError(error, "Failed to deny the members role request.", response);					
+		}else{
+			var ret = {}
+			ret.memberId = targetMemberId
+			ret.roleName = roleName
+			ret.status = "DENIED"
+			response.json(ret);
+		}
+	})
+})
+
+app.post('/my/facebook', function(request, response){
+	let jwtDecoded = request.jwt
+	let facebookUserId = request.body.facebookUserId
+	let totalRecs = 0
+	let articlesForUser = articles.getArticlesForUser(facebookUserId)
+	.then((articleList) =>{
+		articles.changeOwner(articleList, jwtDecoded.userId, jwtDecoded.userId)
+		.then((data) => {
+			if(articleList.length > 0){
+				totalRecs += articleList.length
+				articlesForUser.bind(facebookUserId)
+			}else{
+				response.json({"success":"Migrated " + totalRecs + " records"})
+			}
+		})
+		.catch((error) => {
+			console.log(error)
+			err.reportError(error, "Failed to upgrade user account", response)
+		})
+	})
+	.catch((error) => {
+		err.handleError(error, response, "Failed to deny role requests", 400)
+	})
 })
 
 app.use('/documentation', express.static('docs'))

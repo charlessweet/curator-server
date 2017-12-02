@@ -210,3 +210,39 @@ exports.analyzeLink = function(validationQuery, callback){
 		})
 	}	
 }
+
+exports.getArticlesForUser = function(userId){
+	const getArticlesForUserPromise = new Promise((resolve, reject) => {
+		var relativeUrl = "/my_site_biases/_design/my_sites/_view/my_sites_idx?limit=100&reduce=false&startkey=%22" + userId + "%22&endkey=%22" + userId + "%22";
+		//retrieve biases for the individual
+		couch.callCouch(relativeUrl, "GET", null, function(error, data){
+			if(common.varset(error)){
+				reject("Failed while searching for articles for user.")
+			}else{
+				var parsedRows = (common.varset(data.rows) ? data.rows.map((r)=>{return r.value}) : [])
+				resolve(parsedRows)
+			}
+		})
+	})
+	return getArticlesForUserPromise
+}
+
+exports.changeOwner = function(articleList, callingUserId, newOwnerUserId){
+	const changeOwnerPromise = new Promise((resolve, reject) => {
+		for(let i = 0; i < articleList.length; i++){
+			articleList[i].userId = newOwnerUserId
+			articleList[i].lastModifiedBy = callingUserId
+			articleList[i].lastModifiedDate = new Date()
+		}
+		let relativeUrl = "/my_site_biases/_bulk_docs"
+		let docs= {}
+		docs.docs = articleList
+		couch.callCouch(relativeUrl, "POST", docs, function(error, data){
+			if(common.varset(error))
+				reject("Some articles could not be changed")
+			else
+				resolve(data)
+		})
+	})
+	return changeOwnerPromise
+}
