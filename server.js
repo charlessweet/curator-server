@@ -632,22 +632,37 @@ app.put('/articles/:articleId/keywords', function(request, response){
 	});	
 });
 
-//retrieve bias information for a specific article
 //role:user
-app.get('/articles/:articleId', function(request,response){
-	 auth.verifyToken(request, response, function(error, response, data){
-		var id = request.params.articleId;
-		var relativeUrl = "/site_biases/_design/articletext/_view/articletext_idx?limit=1&reduce=false&startkey=%22" + id + "%22&endkey=%22" + id + "%22";
-		//console.log(relativeUrl);
-		 couch.callCouch(relativeUrl, "GET", null, function(error,data){
-			if(common.varset(error)){
-				err.reportError(error, "Failed to retrieve summaries.",response);
-			}else{
-				response.json(data);
-			}
-		});
-	});	
+app.get('/articles/:articleId/text', function(request,response){
+	var id = request.params.articleId;
+	var relativeUrl = "/site_biases/_design/articletext/_view/articletext_idx?limit=1&reduce=false&startkey=%22" + id + "%22&endkey=%22" + id + "%22";
+	//console.log(relativeUrl);
+	 couch.callCouch(relativeUrl, "GET", null, function(error,data){
+		if(common.varset(error)){
+			err.reportError(error, "Failed to retrieve summaries.",response);
+		}else{
+			response.json(data);
+		}
+	});
 });
+
+app.get('/articles/:articleId', function(request, response){
+	var id = request.params.articleId
+
+	var relativeUrl = "/site_biases/" + id
+	console.log(relativeUrl);
+	 couch.callCouch(relativeUrl, "GET", null, function(error,data){
+		if(common.varset(error)){
+			err.reportError(error, "Failed to retrieve summaries.",response);
+		}else{
+			delete data._rev
+			data.id = data._id
+			delete data._id
+			response.json(data);
+		}
+	})	
+
+})
 
 //retrieve article summaries for all articles in the database.  if missing_tag is definied, then articles must *not* have the 
 //missing tag in their keywords to show up in the returned result set

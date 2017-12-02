@@ -109,7 +109,8 @@ exports.validateJWT = function(req, res, next) {
 			}catch(e){
 				console.log("Failed to validate JWT", req.url, e)
 				let error = {}
-				error.message = "Failed to validate JWT."
+				error.error = "Failed to validate JWT error"
+				error.message = "Failed to validate JWT"
 				error.httpCode = 401
 				res.status(401).json(error)
 			}
@@ -178,12 +179,12 @@ exports.validateBiasCheckerApp = function(req,res,next){
 
 exports.verifyToken = function(request, response, callback){
 	if(request.query.biasToken === undefined){
-		reportError("No biasToken was provided.", "Failed to validate token.", response, 401)
+		err.reportError("No biasToken was provided.", "Failed to validate token.", response, 401)
 	}else{
 		var relativeUrl = "/facebook_users/_design/tokens/_view/tokens_idx?limit=100&reduce=false&startkey=%22" + request.query.biasToken + "%22&endkey=%22" + request.query.biasToken + "%22"
 		 couch.callCouch(relativeUrl, "GET", null, function(error, data){
 			if(common.varset(error)){
-				reportError(error, "Failed to validate token.", response, 401)
+				err.reportError(error, "Failed to validate token.", response, 401)
 			}else{
 				//this is weird.  so there are situations in which we want to know if the token is valid, but don't want to 
 				//fail automatically.  in these cases, we return data
