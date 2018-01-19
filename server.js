@@ -840,6 +840,7 @@ app.post('/authenticate/basic', function(request, response){
 	let authHeader = request.header("Authorization").split(" ")
 	if(authHeader[0] === "Basic"){
 		let credentials = new Buffer(authHeader[1], "base64").toString("ascii").split(":")
+		console.log(credentials[0], credentials[1])
 		//console.log(credentials)
 		let userName = credentials[0]
 		let password = credentials[1]
