@@ -37,7 +37,8 @@ exports.generatePasswordHash = function(password, passwordSalt){
 	return sha256(password + passwordSalt) 
 }
 
-exports.checkIfMemberExists = function(userName, callback){
+exports.checkIfMemberExists = function(userName, callback, returnUser){
+	returnUser = (returnUser !== undefined && returnUser === true)
 	userName = encodeURIComponent(userName)
 	let relativeUrl = "/member/_design/memberships/_view/members_by_username?limit=2&reduce=false&startkey=%22" + userName + "%22&endkey=%22" + userName + "%22"
 	couch.callCouch(relativeUrl, "GET", null, function(error, members){
@@ -45,6 +46,10 @@ exports.checkIfMemberExists = function(userName, callback){
 			let result = { "exists": false}
 			if(members.rows.length > 0){
 				result.exists = true
+				result.memberId = members.rows[0].id
+			}
+			if(returnUser){
+				result.memberInfo = members.rows[0]
 			}
 			callback(null, result)
 		}else{
@@ -85,16 +90,16 @@ exports.getMemberByUsernamePassword = function(userName, pwd, response, callback
 		if(common.varset(error)){
 			callback({"error":"Could not load roles."}, null)
 		}else{
-			let roles = data.rows.map((x) => x.value) 
+			let roles = data.rows.map((x) => x.value)
 			callback(null, roles)			
 		}
 	})
 }
 
 exports.validateJWT = function(req, res, next) {
-	var skip_auth = ["/authenticate/facebook","/authenticate/basic", "/register"]
+	var skip_auth = ["/authenticate/facebook","/authenticate/basic", "/register", "/password-reset"]
 	//don't check for JWT on token exchange
-	if(skip_auth.includes(req.url)){
+	if(skip_auth.includes(req.url) || req.url.startsWith('/password-reset')){
 		next()
 		return
 	}
@@ -120,7 +125,9 @@ exports.validateJWT = function(req, res, next) {
 
 exports.allowCrossDomain = function(req, res, next) {
 	let origin = undefined
+	console.log(new Date() + " Origin=" + req.headers.origin + " Method=" + req.method + " Path=" + req.path);
 	switch(req.headers.origin){
+		case "http://devserver:8888":
 		case "http://localhost:8888":
 		case "https://curator.biaschecker.org":
 		case "https://www.biaschecker.org":
@@ -206,7 +213,7 @@ for signing the jwt.
 */
 exports.generateJwt = function(data){
 	let expirationWindow = (Math.random() * (180 - 60) + 60) + "m";
-	let token = jwt.sign(data, jwt_secret, { expiresIn : expirationWindow, issuer: "urn:curator.biascheker.org"});
+	let token = jwt.sign(data, jwt_secret, { expiresIn : expirationWindow, issuer: "urn:curator.biaschecker.org"});
 	return token;
 }
 
@@ -266,4 +273,84 @@ exports.addRole = function(actingMemberId, targetMemberId, roleName, couchCallba
 		}
 		updateRoleRequest(actingMemberId, targetMemberId, roleName, "GRANTED", couchCallback)
 	});
+}
+
+exports.clearPasswordResetRequest = function(memberId, couchCallback){
+	let relativeUrl = "/reset/" + memberId
+	couch.callCouch(relativeUrl, "GET", null, function(error, result){
+		if(common.varset(error) && error.error != "not_found"){
+			couchCallback(error, null)
+		}else{
+			if(common.varset(error) && error.error === "not_found"){
+				couchCallback(undefined, {"message":"not_found"}) //call back without error
+			}else{
+				relativeUrl = relativeUrl + "?rev=" + result._rev
+				couch.callCouch(relativeUrl, "DELETE", null, couchCallback)				
+			}
+		}
+	})
+}
+
+exports.savePasswordResetRequest = function(email, memberId, passwordRequestId, couchCallback){
+	let relativeUrl = "/reset/" + memberId
+	let prr = {}
+	prr.email = email
+	prr.passwordRequestId = passwordRequestId
+	let expire = new Date()
+	prr.expiresOn = expire.setDate(expire.getDate() + 1).toString()
+	this.clearPasswordResetRequest(memberId, function(error, result){
+		if(common.varset(error)){
+			couchCallback(error, null)
+		}else{
+			couch.callCouch(relativeUrl, "PUT", prr, function(error, result){
+				if(common.varset(error)){
+					couchCallback(error, null)
+				}else{
+					couchCallback(null, prr)
+				}
+			})
+		}
+	})
+}
+
+exports.getPasswordResetRequest = function(passwordRequestId, couchCallback){
+	let relativeUrl = '/reset/_design/active-reset-requests/_view/arr_idx?startKey=' + passwordRequestId +'&stopKey=' + passwordRequestId
+	couch.callCouch(relativeUrl, "GET", null, function(error, password){
+		if(common.varset(error)){
+			couchCallback(error, null)
+		}else{
+			if(password.rows.length > 0){
+				let prr = password.rows[0].value
+				exports.getMember(prr, couchCallback)				
+			}else{
+				couchCallback({"error":"No existing password request."}, null)
+			}
+			//TODO: this is very inelegant - fix it
+		}
+	})
+}
+
+exports.resetPasswordByRequest = function(passwordRequestId, targetPassword, couchCallback){
+	this.getPasswordResetRequest(passwordRequestId, function(error, result){
+		if(common.varset(error)){
+			couchCallback(error, null)
+		}else{
+
+			let relativePwdUrl = "/password/" + result._id
+			couch.callCouch(relativePwdUrl, "GET", null, function(error, password){
+				if(common.varset(error)){
+					couchCallback(error, null)
+				}else{
+					password.value = exports.generatePasswordHash(targetPassword, result.password_salt)
+					couch.callCouch(relativePwdUrl, "PUT", password, function(error, data){
+						if(common.varset(error)){
+							couchCallback(error, null)
+						}else{
+							exports.clearPasswordResetRequest(result.memberId, couchCallback)
+						}
+					})		
+				}
+			})		
+		}
+	})
 }

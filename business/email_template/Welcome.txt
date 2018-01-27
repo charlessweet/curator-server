@@ -1,0 +1,12 @@
+Hi {toEmail},
+
+Thank you for trying out Curator! Here are a few of the things you can do:
+   - Check news stories for bias automatically! Post a URL and our algorithm detects level of bias, normalized so you can compare articles.
+   - See what the latest news stories are and how they compare by logical errors and factual errors.
+   - Analyze articles and contribute to a growing body of news analysis.
+
+You have access to over a thousand articles already analyzed for bias within Curator. Come back frequently and enjoy a more nuanced perspective.
+
+Sincerely,
+
+Curator Admin
