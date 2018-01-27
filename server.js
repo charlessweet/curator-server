@@ -740,6 +740,7 @@ app.post('/password-reset', function(request, response){
 					parms.rootUrl = request.headers.origin
 					parms.resetRequestId = savedReset.passwordRequestId
 					parms.toEmail = request.body.email
+					parms.subject = "Curator: Password Reset Request Accepted"
 					email.sendEmailFromTemplate(EmailTemplates[1], parms);	
 
 					let ret = {}
@@ -789,6 +790,7 @@ app.post('/register', function(request, response){
 								let parms = {}
 								parms.rootUrl = request.headers.origin
 								parms.toEmail = member.email
+								parms.subject = "Welcome to Curator!"
 								email.sendEmailFromTemplate(EmailTemplates[0], parms);
 
 								response.json(ret)

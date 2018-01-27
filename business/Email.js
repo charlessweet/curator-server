@@ -29,7 +29,7 @@ let sendTestEmail = (htmlBody, textBody, parms) => {
     const msg = {
         from: '"Do Not Reply" <donotreply@curator.biaschecker.org>', // sender address
         to: parms.toEmail, // list of receivers
-        subject: "Password Reset Confirmation", // Subject line
+        subject: parms.subject, // Subject line
         text: textBody, // plain text body
         html: htmlBody // html body
     }
