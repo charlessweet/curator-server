@@ -127,6 +127,7 @@ exports.allowCrossDomain = function(req, res, next) {
 	let origin = undefined
 	console.log(new Date() + " Origin=" + req.headers.origin + " Method=" + req.method + " Path=" + req.path);
 	switch(req.headers.origin){
+		case "http://10.0.0.54:8888":
 		case "http://devserver:8888":
 		case "http://localhost:8888":
 		case "https://curator.biaschecker.org":

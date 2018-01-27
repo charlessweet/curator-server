@@ -1,12 +1,11 @@
 'use strict';
 const nodemailer = require('nodemailer');
 const fs = require('fs')
+const sgMail = require('@sendgrid/mail');
 
 
 let applyParms = (content, parms) => {
-    console.log("applyParms", parms)
     for(const key in parms){
-        console.log(key)
         content = content.replace("{" + key + "}", parms[key])
     }
     return content
@@ -24,6 +23,19 @@ exports.sendEmailFromTemplate = (template, parms) => {
 }
 
 let sendTestEmail = (htmlBody, textBody, parms) => {
+    // using SendGrid's v3 Node.js Library
+    // https://github.com/sendgrid/sendgrid-nodejs
+    sgMail.setApiKey(process.env.SENDGRID_API_KEY)
+    const msg = {
+        from: '"Do Not Reply" <donotreply@curator.biaschecker.org>', // sender address
+        to: parms.toEmail, // list of receivers
+        subject: "Password Reset Confirmation", // Subject line
+        text: textBody, // plain text body
+        html: htmlBody // html body
+    }
+    sgMail.send(msg)
+}
+let sendTestEmail_NodeMailer = (htmlBody, textBody, parms) => {
     // Generate test SMTP service account from ethereal.email
     // Only needed if you don't have a real mail account for testing
     nodemailer.createTestAccount((err, account) => {

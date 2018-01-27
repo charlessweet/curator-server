@@ -34,6 +34,7 @@ var fbapp_secret = (process.env.FB_APP_SECRET || "50d4cbbc4f431f21f806d50dbe0ed6
 
 var AUTOMONITOR_LOG_ENABLED = (process.env.AUTOMONITOR_LOG_ENABLED || "yes");
 var FB_POLLING_RATE = (process.env.FB_POLLING_RATE || 1000*60*5);
+var email = require('./business/Email.js');
 
 //print config info
 function printConfig(){
@@ -303,7 +304,7 @@ app.post('/analyze', function(request, response){
 	articles.analyzeLink(request.body, (error, data)=> {
 		if(common.varset(error)){
 			if(error.error === "conflict"){
-				err.reportError({"error":"Request already exists."}, "No  reason to revalidate since the request already exists.", response, "409")
+				err.reportError({"error":"Request already exists."}, "No reason to revalidate since the request already exists.", response, "409")
 			}else{
 				err.reportError(error, "Failed to validate.", response, 400)					
 			}
@@ -312,6 +313,17 @@ app.post('/analyze', function(request, response){
 		}
 	});
 });
+
+app.post('/password-reset/:passwordResetRequestId', function(request, response){
+	//get member using password request id
+	auth.resetPasswordByRequest(request.params.passwordResetRequestId, request.body.password, function(error, member){
+		if(common.varset(error)){
+			err.reportError(error, "Failed to reset.", response, 400)
+		}else{
+			response.json({"status":"password changed"})
+		}
+	})
+})
 
 app.post('/my/password', function(request, response){
 	auth.getMember(request.jwt.memberId, function(error, member){
@@ -337,7 +349,6 @@ app.post('/my/password', function(request, response){
 //role:user
 app.get('/my/articles', function(request, response){
 	var relativeUrl = "/my_site_biases/_design/my_sites/_view/my_sites_idx?limit=100&reduce=false&startkey=%22" + request.jwt.userId + "%22&endkey=%22" + request.jwt.userId + "%22";
-	console.log("/my/articles", relativeUrl)
 	//retrieve biases for the individual
 	articles.getArticlesForUser(request.jwt.userId)
 	.then((parsedRows)=>{
@@ -650,7 +661,7 @@ app.get('/articles/:articleId', function(request, response){
 	var id = request.params.articleId
 
 	var relativeUrl = "/site_biases/" + id
-	console.log(relativeUrl);
+//	console.log(relativeUrl);
 	 couch.callCouch(relativeUrl, "GET", null, function(error,data){
 		if(common.varset(error)){
 			err.reportError(error, "Failed to retrieve summaries.",response);
@@ -687,14 +698,15 @@ app.get('/articles/summaries', function(request,response){
 });
 
 app.get('/articles', function(request,response){
-	var limit = (request.query.limit === undefined ? 20 : request.query.limit)
-	let relativeUrl = "/site_biases/_design/articletext/_view/article_idx?limit=" + limit + "&reduce=false"
+	var limit = (request.query.limit === undefined ? 40 : request.query.limit)
+	let relativeUrl = "/site_biases/_design/articletext/_view/article_latest_idx?descending=true&limit=" + limit + "&reduce=false"
+	console.log(relativeUrl, request.query)
 	 couch.callCouch(relativeUrl, "GET", null, function(error,data){
 		if(common.varset(error)){
 			err.reportError(error, "Failed to retrieve article summaries.",response);
 		}else{
 			let parsedRows = data.rows
-			let result = parsedRows.reverse().map((couchRow) => {
+			let result = parsedRows.map((couchRow) => {
 				let item = couchRow.value;
 				item.id = item._id;
 				delete item._id;
@@ -711,12 +723,42 @@ app.post('/verify', function(request, response){
 	
 })
 
+const EmailTemplates = ["Welcome", "PasswordReset"]
+app.post('/password-reset', function(request, response){
+	//capture necessary information
+	auth.checkIfMemberExists(request.body.email, function(error, data){
+		if(common.varset(error) || data.memberId === undefined){
+			err.reportError(error, "Could not determine user status.", response);
+		}else{
+			auth.savePasswordResetRequest(request.body.email, data.memberId, common.makeid(64) /* pwdreset id*/, function(error, savedReset){
+				if(common.varset(error)){
+					err.reportError(error, "Failed to save password reset request.",response);
+				}else{
+					//send corresponding reset email
+//					console.log("saved", savedReset)
+					let parms = {}
+					parms.rootUrl = request.headers.origin
+					parms.resetRequestId = savedReset.passwordRequestId
+					parms.toEmail = request.body.email
+					email.sendEmailFromTemplate(EmailTemplates[1], parms);	
+
+					let ret = {}
+					ret.passwordReset = true
+					//only want id for return
+					response.json(ret)
+				}
+			})
+		}
+	})
+})
+
 app.post('/register', function(request, response){
 	//create member object
 	let member = {};
 	member.email = request.body.email;
 	member.userId = common.makeid(64);
 	member.password_salt = common.makeid(64);
+	member.emailConfirmed = false
 	let id = common.makeid(64)
 
 	//create password object
@@ -740,6 +782,15 @@ app.post('/register', function(request, response){
 							}else{
 								var ret = {}
 								ret.memberId = id
+								/*
+								  Send email. This isn't wholly required to have an active account
+								  so fire-and-forget.
+								*/
+								let parms = {}
+								parms.rootUrl = request.headers.origin
+								parms.toEmail = member.email
+								email.sendEmailFromTemplate(EmailTemplates[0], parms);
+
 								response.json(ret)
 							}
 						})
@@ -840,6 +891,7 @@ app.post('/authenticate/basic', function(request, response){
 	let authHeader = request.header("Authorization").split(" ")
 	if(authHeader[0] === "Basic"){
 		let credentials = new Buffer(authHeader[1], "base64").toString("ascii").split(":")
+//		console.log(credentials)
 		//console.log(credentials)
 		let userName = credentials[0]
 		let password = credentials[1]

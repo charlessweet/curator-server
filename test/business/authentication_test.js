@@ -1,5 +1,6 @@
 var assert = require('assert')
 var auth = require('../../business/Authentication.js')
+
 describe("/business/Authentication", function(){
 	describe("generatePasswordHash", function(){
 		it('should match password hash with known hash value', function(){
