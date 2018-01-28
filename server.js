@@ -222,7 +222,6 @@ function validateForUnexpiredUsers(error, data, tokenData){
 								err.reportError(error, "Failed to validate unexpired users.");
 							}else{
 								console.log("UPDATED TOKEN");
-								console.log(data);
 							}
 						});
 					}
