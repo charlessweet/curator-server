@@ -313,7 +313,7 @@
                             </tr>
                           </tbody>
                         </table>
-                        <p>You have access to over a thousand articles already analyzed for bias within Curator. Come back frequently and enjoy a more nuanced perspective.</p>
+                        <p>Come back frequently and enjoy a more nuanced perspective.</p>
                         <p>Sincerely,</p>
                         <p>Curator Admin</p>
                       </td>

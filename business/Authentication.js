@@ -334,17 +334,19 @@ exports.getPasswordResetRequest = function(passwordRequestId, couchCallback){
 exports.resetPasswordByRequest = function(passwordRequestId, targetPassword, couchCallback){
 	this.getPasswordResetRequest(passwordRequestId, function(error, result){
 		if(common.varset(error)){
+			console.log('failed to find password request at all', error)
 			couchCallback(error, null)
 		}else{
-
 			let relativePwdUrl = "/password/" + result._id
 			couch.callCouch(relativePwdUrl, "GET", null, function(error, password){
 				if(common.varset(error)){
+					console.log(relativeUrl, error)
 					couchCallback(error, null)
 				}else{
 					password.value = exports.generatePasswordHash(targetPassword, result.password_salt)
 					couch.callCouch(relativePwdUrl, "PUT", password, function(error, data){
 						if(common.varset(error)){
+							console.log('failed to PUT', password, error)
 							couchCallback(error, null)
 						}else{
 							exports.clearPasswordResetRequest(result.memberId, couchCallback)
