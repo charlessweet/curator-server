@@ -494,7 +494,6 @@ app.post('/validate', function(request, response){
 //delete a tag from site-level article bias information
 //role: philosopher-ruler
 app.delete('/articles/:articleId/tags/:tag', function(request,response){
-	 auth.verifyToken(request, response, function(error, response, data){
 		var relativeUrl = "/site_biases/" + request.params.articleId;
 		 couch.callCouch(relativeUrl, "GET", null, function(error, data){
 			if(common.varset(error)){
@@ -517,7 +516,6 @@ app.delete('/articles/:articleId/tags/:tag', function(request,response){
 				}
 			}
 		});
-	});	
 });
 
 //get member-level article bias information
@@ -564,7 +562,6 @@ app.get('/articles/:articleId/tags', function(request, response){
 //adds a tag to the specified article.
 //role: philosopher-ruler
 app.put('/articles/:articleId/tags/:tag', function(request, response){
-	 auth.verifyToken(request, response, function(error, response, data){
 		var relativeUrl = "/site_biases/" + request.params.articleId;
 		 couch.callCouch(relativeUrl, "GET", null, function(error, data){
 			if(common.varset(error)){
@@ -594,13 +591,11 @@ app.put('/articles/:articleId/tags/:tag', function(request, response){
 				}
 			}
 		});
-	});	
 });
 
 //retrieve the list of keywords associated with an article
 //role:user
 app.get('/articles/:articleId/keywords', function(request, response){
-	 auth.verifyToken(request, response, function(error, response, data){
 		var relativeUrl = "/site_biases/" + request.params.articleId;
 		 couch.callCouch(relativeUrl, "GET", null, function(error, data){
 			if(common.varset(error)){
@@ -611,13 +606,11 @@ app.get('/articles/:articleId/keywords', function(request, response){
 				response.json(ret);
 			}
 		});		
-	});	
 });
 
 //set the list of keywords associated with an article
 //role: philosopher-ruler
 app.put('/articles/:articleId/keywords', function(request, response){
-	 auth.verifyToken(request, response, function(error, response, data){
 		var keywords = request.body;
 		var relativeUrl = "/site_biases/" + request.params.articleId;
 		 couch.callCouch(relativeUrl, "GET", null, function(error, data){
@@ -639,7 +632,6 @@ app.put('/articles/:articleId/keywords', function(request, response){
 				});					
 			}
 		});
-	});	
 });
 
 //role:user
@@ -677,8 +669,7 @@ app.get('/articles/:articleId', function(request, response){
 //retrieve article summaries for all articles in the database.  if missing_tag is definied, then articles must *not* have the 
 //missing tag in their keywords to show up in the returned result set
 //role:user
-app.get('/articles/summaries', function(request,response){
-	 auth.verifyToken(request, response, function(error, response, data){
+app.get('/summaries', function(request,response){
 		var limit = request.query.limit;
 		var tag = request.query.missing_tag;
 		var relativeUrl = "/site_biases/_design/articletext/_view/articleid_idx?limit=" + limit + "&reduce=false";
@@ -693,7 +684,6 @@ app.get('/articles/summaries', function(request,response){
 				response.json(data);
 			}
 		});
-	});	
 });
 
 app.get('/articles', function(request,response){
