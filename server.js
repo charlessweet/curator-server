@@ -687,24 +687,15 @@ app.get('/summaries', function(request,response){
 });
 
 app.get('/articles', function(request,response){
-	var limit = (request.query.limit === undefined ? 40 : request.query.limit)
-	let relativeUrl = "/site_biases/_design/articletext/_view/article_latest_idx?descending=true&limit=" + limit + "&reduce=false"
-	console.log(relativeUrl, request.query)
-	 couch.callCouch(relativeUrl, "GET", null, function(error,data){
-		if(common.varset(error)){
-			err.reportError(error, "Failed to retrieve article summaries.",response);
-		}else{
-			let parsedRows = data.rows
-			let result = parsedRows.map((couchRow) => {
-				let item = couchRow.value;
-				item.id = item._id;
-				delete item._id;
-				delete item._rev;
-				return item;
-			});
-			response.json(result);
-		}
-	});
+	var limit = parseInt(request.query.limit === undefined ? 40 : request.query.limit, 10)
+	var offset = parseInt(request.query.offset === undefined ? 0 : request.query.offset, 10)
+	articles.getArticlesForStream(limit,offset)
+		.then((results) => {
+			response.json(results);
+		})
+		.catch((error)=>{
+			err.reportError(error, "Failed to load stream.", response);
+		});
 });
 
 app.post('/verify', function(request, response){

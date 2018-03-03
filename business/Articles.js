@@ -211,6 +211,29 @@ exports.analyzeLink = function(validationQuery, callback){
 	}	
 }
 
+exports.getArticlesForStream = function(count,offset){
+	const getArticlesForStreamPromise = new Promise((resolve,reject) => {
+		let relativeUrl = "/site_biases/_design/articletext/_view/article_latest_idx?descending=true&limit=" + count + "&reduce=false&skip=" +  offset
+		couch.callCouch(relativeUrl, "GET", null, function(error,data){
+			if(common.varset(error)){
+				reject(error)
+			}else{
+				let parsedRows = data.rows
+				let result = parsedRows.map((couchRow) => {
+					let item = couchRow.value;
+					item.id = item._id;
+					delete item._id;
+					delete item._rev;
+					return item;
+				});
+				resolve(result);
+			}
+		});
+	});
+	return getArticlesForStreamPromise;
+}
+
+
 exports.getArticlesForUser = function(userId){
 	const getArticlesForUserPromise = new Promise((resolve, reject) => {
 		var relativeUrl = "/my_site_biases/_design/my_sites/_view/my_sites_idx?limit=100&reduce=false&startkey=%22" + userId + "%22&endkey=%22" + userId + "%22";
